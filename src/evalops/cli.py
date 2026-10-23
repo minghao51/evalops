@@ -68,6 +68,12 @@ def build_parser():
 
     sub.add_parser("baseline", help="show the current production baseline (git sha, group)")
     sub.add_parser("cost", help="month-to-date eval spend vs budget")
+
+    cf = sub.add_parser("config", help="validate, print the JSON Schema of, or explain evalops.yaml")
+    cfsub = cf.add_subparsers(dest="config_action", required=True)
+    cfsub.add_parser("validate", help="validate evalops.yaml; exit 2 naming every bad key path")
+    cfsub.add_parser("schema", help="print the generated JSON Schema of evalops.yaml")
+    cfsub.add_parser("explain", help="resolved configuration with per-key provenance")
     return p
 
 
@@ -78,6 +84,8 @@ def dispatch(args, cfg) -> dict:
     from .ports import ROLES
     from .registry import Registry, available
 
+    if args.cmd == "config":
+        return config_mod.run_config_command(cfg, args.config_action)
     if args.cmd == "plugins":
         reg = Registry(cfg)
         roles = {}

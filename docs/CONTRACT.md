@@ -45,6 +45,38 @@ Rules:
 5. New codes may only be added by a new ADR; existing meanings are append-only.
 6. `argparse` usage errors are normalized to `2`; `--help` and `--version` are `0`.
 
+### 1.1 Configuration (`evalops.yaml`)
+
+`evalops.yaml` is typed: [`src/evalops/config/models.py`](../src/evalops/config/models.py) holds the
+pydantic v2 model set (D4) and [`docs/evalops.schema.json`](evalops.schema.json) is generated from
+those models (`make schema`, drift-tested in `tests/unit/test_config_models.py`).
+
+- Validation runs on the **merged** document (top level ⊕ the selected `environments.<env>`
+  block), because env blocks are partial overlays by design. Every other block is validated too
+  (merged over the top level, all sections optional), so a typo in an unused block still fails.
+- An unknown key or a wrong type is **exit 2**, and the message names the full dotted key path
+  (`gates.metrics.facts/mean.minn`, `eval.retries`). The error details carry
+  `errors: [{"path", "message"}]` alongside `env` and `path`.
+- Two key sets are **closed** because the runtime reads their names literally, so a typo is exit 2
+  with a dotted path instead of a silently ignored setting:
+  - `plugins.<role>` — exactly the five roles `prompts | datasets | ledger | tracer | evaluator`
+    (`ports.ROLES`), at the top level (`plugins.promps`) and in every `environments.<env>` block
+    (`environments.<env>.plugins.promps`, selected or not).
+  - `eval.row_limits` — exactly `max_steps`, `max_tokens`, `max_seconds` (the keys
+    `traces/capture.py` enforces and `plugins/core.py` uses as the async timeout); `max_step` is
+    `eval.row_limits.max_step`. **Adding a new limit requires updating the model in
+    `src/evalops/config/models.py` in the same change as the runtime that consumes it** — the
+    schema, the dotted-path error and the documentation all follow from the model.
+- `judges.<name>` accepts `min_agreement`, `min_kappa`, `max_mae`, `label`, `threshold`, `model`
+  (`max_mae` is the `mae <= max_mae` threshold `evalops calibrate` enforces for scalar judges).
+- `${VAR}` / `${VAR:-default}` expansion happens before validation and only substitutes text: an
+  env var can never inject a mapping or a list.
+- The runtime view is unchanged from v0.x: `Config.data` is the plain merged dict, and
+  `section/plugin_options/path/lock_dir/hook/plugins` behave as before.
+- `evalops config validate|schema|explain` expose the models; `explain` adds per-key provenance
+  (`top`, `env:<name>`, `default`). `--json` shapes are additive and do not form part of the v1
+  envelope (WP0.5) until a golden snapshot pins them.
+
 ## 2. The `--json` envelope (v1)
 
 Every command supports `--json`. With `--json`, stdout contains exactly **one** JSON document and

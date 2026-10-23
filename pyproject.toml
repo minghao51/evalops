@@ -7,7 +7,8 @@ name = "evalops"
 version = "0.3.0"
 description = "Backend-agnostic versioning, evaluation, gating and cost control for LLM apps (plugins for MLflow, Langfuse, LangSmith, Logfire, git, SQL)"
 requires-python = ">=3.10"
-dependencies = ["pyyaml>=6"]          # core has no vendor dependencies
+# Core stays vendor-free, not dependency-free: pydantic backs the typed config (D4).
+dependencies = ["pyyaml>=6", "pydantic>=2,<3"]
 
 [project.optional-dependencies]
 mlflow = ["mlflow>=3.2,<4"]
