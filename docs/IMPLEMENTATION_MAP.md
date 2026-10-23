@@ -203,12 +203,20 @@ family; at most two parallel workers in disjoint trees.
 | 0.2 | done | `tests/{unit,integration}`, recursive runner, ruff/mypy/CI, no-vendor AST guard; reviewed |
 | 0.3 | done | pydantic config package, generated schema, `evalops config`; reviewed |
 | 0.4 | done | `evalops.contract.formats`, v0 read-compat, semantic fingerprints, exit 7; reviewed |
-| 0.5 | pending | envelope freeze + golden snapshots |
-| 0.6 | pending | `docs/STATE.md`, `CHANGELOG.md`, first CI run |
+| 0.5 | done | `src/evalops/envelope.py`, arg/YAML error envelopes, fd-level stdout capture, 17 goldens, exit matrix 0–7; reviewed |
+| 0.6 | in progress | `docs/STATE.md` + `CHANGELOG.md` done; first CI run pending a push |
 
-**Next increment:** WP0.3 (typed config + `docs/evalops.schema.json` + `evalops config`)
-and WP0.5 (envelope freeze) in parallel — both are code-only, disjoint files, and unblock
-phase 1 (redaction needs typed config; the gate report needs the envelope).
+**Next increment:** phase 1 (WP1.1 redaction, WP1.2 ledger integrity, WP1.3 statistics) — the typed
+config and frozen envelope it depends on are now in place. WP0.6 closes when the repo first runs
+its GitHub Actions matrix (needs a push, which requires explicit approval).
+
+### Phase 0 delivered
+
+- typed config (`src/evalops/config/`, generated schema, `evalops config`)
+- frozen JSON envelope + exit codes 0–7 pinned by 17 goldens and an exit matrix
+- versioned persisted formats with semantic-only identity hashes
+- contract doc, 7 ADRs, `make check`, CI workflow, vendor-import guard
+- 17 → 125 tests, all offline
 
 ## 7. Review log
 
@@ -224,6 +232,10 @@ phase 1 (redaction needs typed config; the gate report needs the envelope).
 | WP0.3-1 | BLOCK | 3 (`max_mae` rejected, plugin roles unconstrained, out-of-scope docs) | WP0.3b |
 | WP0.3-2 | BLOCK | 2 (schema allowed null role values the runtime rejected; `max_mae: null` crashed calibration) | WP0.3c + orchestrator `threshold: null` fix |
 | WP0.3-3 | PASS | 0 (residual: `threshold: null`, fixed by orchestrator immediately) | f0da4ce |
+| WP0.5-1 | BLOCK | 7 (argparse/YAML escaped the envelope, stdout pollution, 7 goldens only, env masked, weakened assertion, stale docstring) | WP0.5b |
+| WP0.5-2 | BLOCK | 3 (sys.__stdout__/subprocess capture, early envelopes ignored default_env, contract overclaimed coverage) | WP0.5c |
+| WP0.5-3 | BLOCK | 3 (in-process capsys capture, recursive-alias env crash, option value parsed as subcommand) | WP0.5d |
+| WP0.5-4 | PASS | 0 | 7d7d8f1 |
 
 Lesson carried into later phases: a guard that reasons about "does this code raise?" must be
 syntactic and conservative, and every guard must state — and pin with a test — exactly what it

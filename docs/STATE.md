@@ -4,10 +4,10 @@ Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 0 (bedrock) — G0 accepted, WP0.3 in progress.
-- **Tests:** 55 green (`make check`), 17 at baseline.
+- **Phase:** 0 (bedrock) — G0 accepted, WP0.3/0.4/0.5 done; WP0.6 pending the first CI run.
+- **Tests:** 125 green (`make check`), 17 at baseline.
 - **Gates passed:** G0 (contract, formats, tooling) — with two tracked compromises below.
-- **Next:** WP0.3 (typed config) → WP0.5 (envelope freeze) → WP0.6 (state/changelog/CI).
+- **Next:** phase 1 — WP1.1 redaction, WP1.2 ledger integrity, WP1.3 statistics.
 
 ## Work packages
 
@@ -17,9 +17,9 @@ Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 0.1 contract doc + ADRs | done | `6280873` |
 | 0.2 dev tooling + test layout + vendor-import guard | done | `6280873`…`09c26fb` |
 | 0.4 versioned formats + semantic fingerprints | done | `6280873` |
-| 0.3 typed config (pydantic) + JSON schema | in progress | — |
-| 0.5 envelope freeze + exit-code goldens | pending | — |
-| 0.6 STATE/CHANGELOG + first real CI run | in progress (this file) | — |
+| 0.3 typed config (pydantic) + JSON schema | done | `f0da4ce` |
+| 0.5 envelope freeze + exit-code goldens | done | `7d7d8f1` |
+| 0.6 STATE/CHANGELOG + first real CI run | in progress (docs done, CI pending push) | `649f151` |
 
 ## Known compromises (tracked, not forgotten)
 
