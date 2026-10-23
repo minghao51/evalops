@@ -4,25 +4,34 @@ The offline suite must run with only `pyyaml` (+ dev tools) installed. Vendor pl
 ``evalops/plugins`` and trace adapters in ``evalops/traces``, and both are allowed to import their
 SDKs. Everywhere else, a vendor import is allowed only as real graceful degradation: inside a
 function body, or inside a ``try`` that catches ``ImportError``/``ModuleNotFoundError`` and whose
-handlers contain no ``raise`` at all and do nothing that can raise again. A bare ``except:`` and
+handlers are built only from the shapes listed below. A bare ``except:`` and
 ``except Exception`` do not count.
 
-What "nothing that can raise again" means precisely (WP0.4e): a handler is accepted only when
+What that means precisely (WP0.4e): a handler is accepted only when
 *every* statement in its body is on a **whitelist of shapes** -- ``pass``/``continue``, an
-assignment (``x = None``, ``x: int = 1``, ``x += 1``, ``obj.attr = ...``) whose target and value
+assignment (``x = None``, ``x: int = 1``, ``obj.attr = ...``) whose target and value
 are themselves whitelisted, ``return``/``return None``, or an expression statement that is a
 reporting call rooted at ``warnings``/``logging``. Every other statement disqualifies the fallback,
 and so does every non-literal expression shape: `raise`, `import`, `with`/`async with`,
 `try`/`except*`, `def`/`class`, `if`, loops, `match`, `del`, `global`/`nonlocal`; arithmetic
-(``x = 1 / 0``), comparisons, boolean and unary operators, subscripting (``x = d["k"]``),
-conditional expressions, lambdas, comprehensions, ``await``/``yield``, walrus, f-strings, starred
-unpacking, and any call not rooted at ``warnings``/``logging`` (so ``except ImportError: fallback()``
-and ``except ImportError: x = 1 / 0`` are both rejected). `return 1` is a violation too: only `None`
-may be returned, and ``del x`` is a violation because ``Delete`` is not on the statement whitelist.
-This is a whitelist of syntactic shapes, **not a proof** that the accepted
-handler cannot raise -- it is deliberately over-approximate in the safe direction, so it rejects
-some legitimate fallbacks (an f-string in a warning message, a local ``logger`` alias) rather than
-risk accepting a mandatory import in disguise.
+(``x = 1 / 0``), augmented assignment (``x += 1``), comparisons, boolean and unary operators,
+subscripting (``x = d["k"]``), conditional expressions, lambdas, comprehensions, ``await``/``yield``,
+walrus, f-strings, starred unpacking, and any call not rooted at ``warnings``/``logging`` (so
+``except ImportError: fallback()`` and ``except ImportError: x = 1 / 0`` are both rejected).
+`return 1` is a violation too: only `None` may be returned, and ``del x`` is a violation because
+``Delete`` is not on the statement whitelist.
+
+Scope of the claim: this is a whitelist of syntactic shapes, and it does **not** prove that an
+accepted handler cannot raise. A name or attribute in an accepted shape can still fail
+(``x = NEVER_DEFINED`` -> ``NameError``, ``obj.attr`` -> ``AttributeError``), and a locally bound
+``warnings`` is trusted by name. Those are static-analysis concerns, not import-shape concerns:
+ruff ``F821`` and mypy already reject undefined names, and this guard's narrower job is to prove the
+vendor import is not *structurally* mandatory -- no handler re-raises, calls non-reporting code, or
+runs control flow/arithmetic that hides work. Probes at the bottom pin that boundary explicitly.
+
+Direction of error: where the shape whitelist is unsure it rejects, so it can reject a legitimate
+fallback (an f-string in a warning message, a local ``logger`` alias) rather than accept a
+mandatory import in disguise.
 
 The scanner is exercised on planted violations below, so a broken scanner cannot pass silently.
 
@@ -584,6 +593,24 @@ def test_scanner_allows_assignment_and_reporting_shapes_in_a_handler():
     for label, source in probes.items():
         found = scan_source(source)
         assert found == [], f"scanner rejected the legitimate {label} fallback: {found}"
+
+
+def test_documented_boundary_name_and_attribute_errors_are_static_analysis_territory():
+    """Pin the guard's documented limit so it cannot be mistaken for a no-raise proof.
+
+    ``x = NEVER_DEFINED`` raises NameError when the vendor SDK is missing, and ``obj.attr`` can
+    raise AttributeError -- the shape whitelist accepts both, because proving otherwise requires
+    flow/interprocedural analysis and belongs to ruff ``F821`` and mypy, which run in `make check`.
+    This test asserts the accepted boundary explicitly: if someone tightens the guard to reject
+    these shapes, this test fails and the docstring must be updated with it.
+    """
+    boundary = {
+        "undefined_name": "try:\n    import mlflow\nexcept ImportError:\n    x = NEVER_DEFINED\n",
+        "attribute_read": "try:\n    import mlflow\nexcept ImportError:\n    x = mod.enabled\n",
+        "reporting_root_trusted_by_name": 'try:\n    import mlflow\nexcept ImportError:\n    warnings.warn("x")\n',
+    }
+    for label, source in boundary.items():
+        assert scan_source(source) == [], f"boundary {label} is no longer accepted; update the docstring"
 
 
 def test_scanner_rejects_logger_call_on_a_local_alias_because_root_is_not_logging():
