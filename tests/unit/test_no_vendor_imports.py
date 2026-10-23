@@ -146,7 +146,13 @@ def _call_root(func: ast.expr) -> str | None:
 
 
 def _expr_is_safe(node: ast.expr | None) -> bool:
-    """True when an expression is built only from shapes that cannot raise on their own.
+    """True when an expression is built only from the whitelisted shapes.
+
+    This is a shape check, **not** a no-raise proof: an accepted name can be unbound (NameError)
+    and an accepted attribute can be missing (AttributeError); those are caught by ruff ``F821``
+    and mypy, not here (see the module docstring's scope paragraph). What it does guarantee is that
+    no fallible *work* is hidden in an accepted shape: arithmetic, comparisons, subscripting,
+    calls to non-reporting code, comprehensions and the rest are rejected by node type.
 
     WP0.4e: the handler body is a *whitelist of statement and expression shapes*, not an attempt to
     prove that arbitrary code cannot raise. `x = 1 / 0` and `x = d["k"]` raise, so neither the
@@ -193,7 +199,9 @@ def _stmt_is_safe(stmt: ast.stmt) -> bool:
     if isinstance(stmt, (ast.Pass, ast.Continue)):
         return True
     if isinstance(stmt, ast.Expr):
-        return _expr_is_safe(stmt.value)
+        # Only a reporting call: a bare name/attribute/constant statement does no fallback work and
+        # would let a NameError/AttributeError through as if it were graceful degradation.
+        return isinstance(stmt.value, ast.Call) and _expr_is_safe(stmt.value)
     if isinstance(stmt, ast.Return):
         # bare ``return`` / ``return None`` only: a returned value would change the caller's result
         return stmt.value is None or (isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
@@ -564,6 +572,8 @@ def test_scanner_rejects_fallible_expressions_in_a_handler():
         "subscript_target": 'try:\n    import mlflow\nexcept ImportError:\n    d["k"] = None\n',
         # augmented assignment implies an arithmetic/__iadd__ operation that can raise
         "augassign": "try:\n    import mlflow\nexcept ImportError:\n    x += 1\n",
+        # a bare expression statement is not a reporting call and can raise NameError/AttributeError
+        "bare_name_statement": "try:\n    import mlflow\nexcept ImportError:\n    NEVER_DEFINED\n",
     }
     for label, source in probes.items():
         found = scan_source(source)
