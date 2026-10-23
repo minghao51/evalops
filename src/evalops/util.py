@@ -15,15 +15,27 @@ EXIT_CONTRACT = 7  # a persisted artifact declares a format this evalops does no
 
 
 class EvalOpsError(Exception):
-    def __init__(self, message: str, code: int = EXIT_RUNTIME, details: dict | None = None):
+    """A recoverable failure: `code` is the process exit code, `hint` is actionable advice.
+
+    `details` and `hint` are surfaced in the `--json` envelope as `errors[0].details` and
+    `errors[0].hint` (docs/CONTRACT.md §2); they never add top-level envelope fields.
+    """
+
+    def __init__(self, message: str, code: int = EXIT_RUNTIME, details: dict | None = None, hint: str | None = None):
         super().__init__(message)
         self.code = code
         self.details = details or {}
+        self.hint = hint
 
 
 class CapabilityError(EvalOpsError):
+    """Exit 6: the configured plugin cannot serve the role. The message stays self-contained (it is
+    what humans read) and the hint is also exposed structurally for `--json` consumers."""
+
     def __init__(self, plugin: str, operation: str, hint: str = ""):
-        super().__init__(f"plugin '{plugin}' does not support {operation}. {hint}".strip(), EXIT_CAPABILITY)
+        super().__init__(
+            f"plugin '{plugin}' does not support {operation}. {hint}".strip(), EXIT_CAPABILITY, hint=hint or None
+        )
 
 
 class FormatError(EvalOpsError):
@@ -77,14 +89,3 @@ def git_dirty(cwd=None) -> bool:
         return bool(_git("status", "--porcelain", cwd=cwd))
     except Exception:  # noqa: BLE001
         return True
-
-
-def emit(payload: dict, as_json: bool) -> None:
-    if as_json:
-        print(json.dumps(payload, indent=2, default=str))
-        return
-    print(payload.get("summary") or payload.get("error") or "")
-    for key, value in payload.items():
-        if key in {"summary", "error", "ok"}:
-            continue
-        print(f"  {key}: {json.dumps(value, default=str) if isinstance(value, (dict, list)) else value}")

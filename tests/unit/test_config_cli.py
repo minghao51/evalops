@@ -1,9 +1,10 @@
 """WP0.3: ``evalops config validate|schema|explain`` — the typed config is reachable from the CLI.
 
-Falsifies, in order: (a) ``config validate`` on the shipped file exits 0 with
-``{ok, env, path, errors: []}``, (b) an unknown key exits 2 naming ``gates.metrics.facts/mean.minn``,
-(c) a wrong type exits 2 naming ``eval.retries``, (d) ``config schema`` prints JSON, (e) ``config
-explain`` reports per-key provenance including an env-block override of ``plugins``, (f) neither
+Falsifies, in order: (a) ``config validate`` on the shipped file exits 0 with the frozen envelope
+(``ok, code, schema_version, command, env, data, errors``) and no errors, (b) an unknown key exits 2
+naming ``gates.metrics.facts/mean.minn``, (c) a wrong type exits 2 naming ``eval.retries``,
+(d) ``config schema`` prints JSON, (e) ``config explain`` reports per-key provenance including an
+env-block override of ``plugins``, (f) neither
 command changes an existing command's exit code or output keys, (g) WP0.3b: a role typo
 (``plugins.promps``) is exit 2 with a dotted path at the top level and in selected *and*
 unselected env blocks, ``eval.row_limits.max_step`` is rejected while the three real limits pass,
@@ -33,6 +34,15 @@ app: {predict_fn: app.hooks:build_predict_fn}
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _issues(envelope: dict) -> list[dict]:
+    """Structured validation issues: CONTRACT §1.1 puts them in ``errors[0].details.errors``."""
+    return envelope["errors"][0]["details"]["errors"]
+
+
+def _message(envelope: dict) -> str:
+    return envelope["errors"][0]["message"]
+
+
 def _write(text: str) -> pathlib.Path:
     directory = pathlib.Path(tempfile.mkdtemp(prefix="evalops-config-cli-"))
     path = directory / "evalops.yaml"
@@ -82,10 +92,10 @@ def _run_text(*args: str, cwd: pathlib.Path | None = None, env: dict | None = No
 def test_config_validate_shipped_file_exits_zero():
     code, out = _run("config", "validate")
     assert code == 0, out
-    assert out["ok"] is True
-    assert out["env"] == "local"
-    assert out["path"].endswith("evalops.yaml")
-    assert out["errors"] == []
+    assert out["ok"] is True and out["code"] == 0
+    assert out["env"] == "local" and out["data"]["env"] == "local"
+    assert out["data"]["path"].endswith("evalops.yaml")
+    assert out["errors"] == [] and out["data"]["errors"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -96,16 +106,22 @@ def test_config_validate_unknown_metric_key_exits_two():
     code, out = _run("--config", str(path), "config", "validate")
     assert code == 2, out
     assert out["ok"] is False and out["code"] == 2
-    assert [issue["path"] for issue in out["errors"]] == ["gates.metrics.facts/mean.minn"]
-    assert "gates.metrics.facts/mean.minn" in out["error"]
+    assert [issue["path"] for issue in _issues(out)] == ["gates.metrics.facts/mean.minn"]
+    assert "gates.metrics.facts/mean.minn" in _message(out)
 
 
 def test_config_validate_wrong_type_exits_two():
     path = _write(MINIMAL + 'eval: {retries: "many"}\n')
-    code, out = _run("--config", str(path), "config", "validate", env={"EVALOPS_CONFIG": str(path)})
+    # EVALOPS_CONFIG points at a *different*, valid file: the reported path must be --config's one,
+    # so this fails if the loader reports the wrong file (or no file at all).
+    other = _write(MINIMAL)
+    code, out = _run("--config", str(path), "config", "validate", env={"EVALOPS_CONFIG": str(other)})
     assert code == 2, out
-    assert [issue["path"] for issue in out["errors"]] == ["eval.retries"]
-    assert out["path"] == str(path) or out["path"].endswith("evalops.yaml")
+    assert [issue["path"] for issue in _issues(out)] == ["eval.retries"]
+    details = out["errors"][0]["details"]
+    assert details["path"] == str(path)
+    assert details["path"] != str(other)
+    assert details["env"] == "local"
 
 
 def test_config_validate_accepts_a_judge_max_mae():
@@ -127,8 +143,8 @@ def test_config_validate_rejects_a_null_plugin_role_but_accepts_omitted_roles():
     code, out = _run("--config", str(null_role), "config", "validate")
     assert code == 2, out
     assert out["ok"] is False and out["code"] == 2
-    assert [issue["path"] for issue in out["errors"]] == ["plugins.prompts"]
-    assert "plugins.prompts" in out["error"]
+    assert [issue["path"] for issue in _issues(out)] == ["plugins.prompts"]
+    assert "plugins.prompts" in _message(out)
     # an empty `plugins` block, or none at all, is still exit 0: DEFAULT_PLUGINS fills the roles
     empty = MINIMAL.replace(
         "plugins: {prompts: git, datasets: git, ledger: sql, tracer: none, evaluator: core}", "plugins: {}"
@@ -146,8 +162,8 @@ def test_config_validate_rejects_a_plugin_role_typo_with_a_dotted_path():
     code, out = _run("--config", str(path), "config", "validate")
     assert code == 2, out
     assert out["ok"] is False and out["code"] == 2
-    assert [issue["path"] for issue in out["errors"]] == ["plugins.promps"]
-    assert "plugins.promps" in out["error"]
+    assert [issue["path"] for issue in _issues(out)] == ["plugins.promps"]
+    assert "plugins.promps" in _message(out)
 
 
 def test_config_validate_rejects_a_plugin_role_typo_in_every_env_block():
@@ -157,11 +173,11 @@ def test_config_validate_rejects_a_plugin_role_typo_in_every_env_block():
     )
     code, out = _run("--config", str(_write(selected)), "config", "validate", env={"EVALOPS_ENV": "local"})
     assert code == 2, out
-    assert [issue["path"] for issue in out["errors"]] == ["plugins.promps", "environments.other.plugins.promps"]
+    assert [issue["path"] for issue in _issues(out)] == ["plugins.promps", "environments.other.plugins.promps"]
     unselected = MINIMAL + "environments:\n  local: {}\n  other: {plugins: {promps: git}}\n"
     code, out = _run("--config", str(_write(unselected)), "config", "validate", env={"EVALOPS_ENV": "local"})
     assert code == 2, out
-    assert [issue["path"] for issue in out["errors"]] == ["environments.other.plugins.promps"]
+    assert [issue["path"] for issue in _issues(out)] == ["environments.other.plugins.promps"]
 
 
 def test_config_validate_rejects_a_row_limits_typo():
@@ -169,7 +185,7 @@ def test_config_validate_rejects_a_row_limits_typo():
     path = _write(MINIMAL + "eval: {row_limits: {max_step: 25}}\n")
     code, out = _run("--config", str(path), "config", "validate")
     assert code == 2, out
-    assert [issue["path"] for issue in out["errors"]] == ["eval.row_limits.max_step"]
+    assert [issue["path"] for issue in _issues(out)] == ["eval.row_limits.max_step"]
     ok = _write(MINIMAL + "eval: {row_limits: {max_steps: 25, max_tokens: 100000, max_seconds: 180}}\n")
     code, out = _run("--config", str(ok), "config", "validate")
     assert code == 0, out
@@ -179,7 +195,7 @@ def test_config_validate_reports_every_problem_at_once():
     path = _write(MINIMAL + 'gates:\n  metrics:\n    facts/mean: {minn: 1}\neval: {retries: "many"}\n')
     code, out = _run("--config", str(path), "config", "validate")
     assert code == 2
-    assert sorted(issue["path"] for issue in out["errors"]) == ["eval.retries", "gates.metrics.facts/mean.minn"]
+    assert sorted(issue["path"] for issue in _issues(out)) == ["eval.retries", "gates.metrics.facts/mean.minn"]
 
 
 def test_existing_commands_also_refuse_an_invalid_config():
@@ -187,7 +203,7 @@ def test_existing_commands_also_refuse_an_invalid_config():
     path = _write(MINIMAL + 'eval: {retries: "many"}\n')
     code, out = _run("--config", str(path), "plugins")
     assert code == 2 and out["code"] == 2
-    assert [issue["path"] for issue in out["errors"]] == ["eval.retries"]
+    assert [issue["path"] for issue in _issues(out)] == ["eval.retries"]
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +212,7 @@ def test_existing_commands_also_refuse_an_invalid_config():
 def test_config_schema_prints_the_generated_schema():
     code, out = _run("config", "schema")
     assert code == 0, out
-    schema = out["schema"]
+    schema = out["data"]["schema"]
     assert schema["title"] == "evalops configuration"
     assert schema["additionalProperties"] is False
     committed = json.loads((REPO / "docs" / "evalops.schema.json").read_text(encoding="utf-8"))
@@ -227,21 +243,21 @@ def test_config_explain_reports_env_override_provenance():
     code, out = _run("--config", str(path), "config", "explain", env={"EVALOPS_ENV": "mlflow"})
     assert code == 0, out
     assert out["env"] == "mlflow"
-    provenance = out["provenance"]
+    provenance = out["data"]["provenance"]
     assert provenance["plugins.ledger"] == "env:mlflow"  # the key the env block moved
     assert provenance["plugins"] == "env:mlflow"  # the section it lives in
     assert provenance["plugins.prompts"] == "top"  # a sibling the env block did not touch
     assert provenance["project"] == "top"
     assert provenance["paths"] == "top"  # a whole section from the file (sub-keys only when moved)
     assert provenance["paths.locks"] == "default"  # not in the file at all
-    assert out["data"]["plugins"]["ledger"] == "mlflow"
-    assert out["data"]["plugins"]["prompts"] == "git"  # untouched sibling from the top level
-    assert "environments" not in out["data"]
+    assert out["data"]["data"]["plugins"]["ledger"] == "mlflow"
+    assert out["data"]["data"]["plugins"]["prompts"] == "git"  # untouched sibling from the top level
+    assert "environments" not in out["data"]["data"]
     # local (no env block) sees every section as coming from the file, or from the model defaults
     code, local = _run("--config", str(path), "config", "explain", env={"EVALOPS_ENV": "local"})
-    assert code == 0 and local["provenance"]["plugins"] == "top"
-    assert local["provenance"]["cost"] == "default"  # only the mlflow block sets `cost`
-    assert "plugins.ledger" not in local["provenance"]  # no sub-key entries when the env block is empty
+    assert code == 0 and local["data"]["provenance"]["plugins"] == "top"
+    assert local["data"]["provenance"]["cost"] == "default"  # only the mlflow block sets `cost`
+    assert "plugins.ledger" not in local["data"]["provenance"]  # no sub-key entries when the env block is empty
 
 
 def test_config_explain_default_provenance_covers_defaulted_keys():
@@ -249,10 +265,11 @@ def test_config_explain_default_provenance_covers_defaulted_keys():
     code, out = _run("--config", str(path), "config", "explain")
     assert code == 0, out
     for role in ("prompts", "datasets", "ledger", "tracer", "evaluator"):
-        assert out["provenance"][f"plugins.{role}"] == "default"
-        assert out["provenance"][f"paths.{role}" if role in ("prompts", "datasets") else "paths.locks"] == "default"
-    assert all(v in ("top", "default") for v in out["provenance"].values())
-    assert out["data"]["app"] == {"predict_fn": "app.hooks:build_predict_fn"}
+        assert out["data"]["provenance"][f"plugins.{role}"] == "default"
+        key = f"paths.{role}" if role in ("prompts", "datasets") else "paths.locks"
+        assert out["data"]["provenance"][key] == "default"
+    assert all(v in ("top", "default") for v in out["data"]["provenance"].values())
+    assert out["data"]["data"]["app"] == {"predict_fn": "app.hooks:build_predict_fn"}
 
 
 # ---------------------------------------------------------------------------
@@ -267,5 +284,5 @@ def test_existing_plugins_command_shape_is_unchanged():
     code, out = _run("plugins")
     assert code == 0
     assert out["ok"] is True and out["env"] == "local"
-    assert set(out["roles"]) == {"prompts", "datasets", "ledger", "tracer", "evaluator"}
-    assert "available" in out and "summary" in out
+    assert set(out["data"]["roles"]) == {"prompts", "datasets", "ledger", "tracer", "evaluator"}
+    assert "available" in out["data"] and "summary" in out["data"]

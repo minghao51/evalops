@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "plan",
+  "env": "local",
+  "data": {
+    "summary": "estimated $<n> for 2 LLM calls",
+    "estimate": {
+      "rows": 1,
+      "repeats": 1,
+      "llm_judges": 1,
+      "judge_only": false,
+      "llm_calls": 2,
+      "gen_usd": "<n>",
+      "judge_usd": "<n>",
+      "total_usd": "<n>",
+      "basis": "config_defaults",
+      "warning": null
+    },
+    "budget": {
+      "estimate_usd": "<n>",
+      "per_run_usd": "<n>",
+      "month_spent_usd": "<n>",
+      "per_month_usd": "<n>",
+      "override": true,
+      "problems": []
+    },
+    "plugins": {
+      "prompts": "git",
+      "datasets": "git",
+      "ledger": "sql",
+      "tracer": "none",
+      "evaluator": "core"
+    }
+  },
+  "errors": []
+}

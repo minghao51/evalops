@@ -1,8 +1,8 @@
 """End-to-end lifecycle on zero-dependency plugins (git prompts/datasets, sql ledger, core evaluator).
 
-Exercises: sync, guard, plan, eval (async + flaky predict with retries), gate, promote, baseline,
-regression detection, judge-only re-scoring, budgets, frozen datasets, capability errors, and a
-third-party plugin loaded via "module:Class".
+Exercises: sync, guard, plan, eval (async + flaky predict with retries), gate, promote, rollback,
+baseline, regression detection, judge-only re-scoring, budgets, frozen datasets, capability errors,
+and a third-party plugin loaded via "module:Class".
 """
 
 import json
@@ -95,58 +95,59 @@ def test_full_lifecycle():
     d = make_project()
 
     code, out = cli(d, "plugins")
-    assert code == 0 and all(r["ok"] for r in out["roles"].values()), out
+    assert code == 0 and all(r["ok"] for r in out["data"]["roles"].values()), out
 
     assert cli(d, "guard")[0] == 0  # static checks pass before first sync
     code, out = cli(d, "sync", "all", "--check")
-    assert code == 4 and "no prompts lock" in out["error"], out
+    assert code == 4 and "no prompts lock" in out["errors"][0]["message"], out
 
     code, out = cli(d, "sync", "all")
-    assert code == 0 and out["prompts"]["registered"] == ["support_system@1"], out
+    assert code == 0 and out["data"]["prompts"]["registered"] == ["support_system@1"], out
     commit(d, "sync")
     assert cli(d, "guard")[0] == 0
     assert cli(d, "sync", "all", "--check")[0] == 0
 
     code, out = cli(d, "plan", "--dataset", "golden_regression", "--stage", "main")
-    assert code == 0 and out["estimate"]["llm_calls"] == 3 * 2 * 2, out
+    assert code == 0 and out["data"]["estimate"]["llm_calls"] == 3 * 2 * 2, out
 
     # PR-stage smoke eval: async predict, first call per row fails -> retried
     code, out = cli(d, "eval", "--dataset", "smoke", "--stage", "pr")
     assert code == 0, out
-    m = out["runs"][0]["metrics"]
+    m = out["data"]["runs"][0]["metrics"]
     assert m["facts/mean"] == 1.0 and m["helpful/mean"] == 1.0 and m["error_rate"] == 0.0, m
     assert m["gen_cost_usd"] > 0 and m["judge_cost_usd_est"] > 0, m
     assert cli(d, "gate")[0] == 0
 
     # main: 2 repeats on golden -> gate -> promote candidate + production (sets baseline)
     code, out = cli(d, "eval", "--dataset", "golden_regression", "--stage", "main")
-    assert code == 0 and len(out["run_ids"]) == 2, out
-    main_group = out["group"]
+    assert code == 0 and len(out["data"]["run_ids"]) == 2, out
+    main_group = out["data"]["group"]
     assert cli(d, "gate")[0] == 0
     code, out = cli(d, "promote", "--alias", "production", "--evidence-group", main_group)
-    assert code == 0 and out["moves"][0]["to"] == "1", out
+    assert code == 0 and out["data"]["moves"][0]["to"] == "1", out
     aliases = json.loads((d / ".evalops/store/prompts/support_system/aliases.json").read_text())
     assert aliases == {"production": "1"}
     assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4  # git-plugin alias move = uncommitted
     commit(d, "promote")  # (ci/pipeline.sh commits it)
     code, out = cli(d, "baseline")
-    assert out["baseline"]["group"] == main_group
+    assert out["data"]["baseline"]["group"] == main_group
 
     # PR-stage evidence cannot be promoted
     code, out = cli(d, "eval", "--dataset", "smoke", "--stage", "pr")
-    pr_group = out["group"]
+    pr_group = out["data"]["group"]
     cli(d, "gate")
     assert cli(d, "promote", "--alias", "production", "--evidence-group", pr_group)[0] == 4
 
     # A worse prompt is caught by the gate (quality drop vs baseline)
     p = d / "prompts" / "support_system.txt"
-    p.write_text(p.read_text() + "\nBE_UNHELPFUL\n")
+    good_prompt = p.read_text()
+    p.write_text(good_prompt + "\nBE_UNHELPFUL\n")
     commit(d, "worse prompt")
     assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4  # out of sync -> guard
     assert cli(d, "sync", "prompts")[0] == 0
     commit(d, "sync worse")
     code, out = cli(d, "eval", "--dataset", "golden_regression", "--stage", "pr")
-    assert code == 0 and out["runs"][0]["metrics"]["facts/mean"] == 0.0
+    assert code == 0 and out["data"]["runs"][0]["metrics"]["facts/mean"] == 0.0
     code, out = cli(d, "gate")
     assert code == 1 and not out["ok"], out
     assert "FAILED" in (d / ".evalops/out/gate_report.md").read_text()
@@ -156,8 +157,39 @@ def test_full_lifecycle():
         d, "eval", "--dataset", "golden_regression", "--stage", "dev", "--judge-only", "--source-group", main_group
     )
     assert code == 0, out
-    m = out["runs"][0]["metrics"]
+    m = out["data"]["runs"][0]["metrics"]
     assert m["gen_cost_usd"] == 0 and m["facts/mean"] == 1.0, m
+
+    # Incident path: roll a production alias back to a known version. The bad prompt is v2, so
+    # first restore the good prompt (v3), prove it on the main stage and promote it; production now
+    # points at v3 and there is somewhere to roll back from.
+    p.write_text(good_prompt)
+    commit(d, "restore prompt")
+    assert cli(d, "sync", "prompts")[0] == 0
+    commit(d, "sync restore")
+    code, out = cli(d, "eval", "--dataset", "golden_regression", "--stage", "main")
+    assert code == 0, out
+    fixed_group = out["data"]["group"]
+    assert cli(d, "gate")[0] == 0
+    code, out = cli(d, "promote", "--alias", "production", "--evidence-group", fixed_group)
+    assert code == 0 and out["data"]["moves"] == [{"prompt": "support_system", "from": "1", "to": "3"}], out
+    commit(d, "promote fixed")
+
+    code, out = cli(d, "rollback", "--alias", "production", "--prompt", "support_system", "--version", "1")
+    assert code == 0 and out["data"]["summary"] == "support_system@production -> 1 (rollback via git)", out
+    aliases = json.loads((d / ".evalops/store/prompts/support_system/aliases.json").read_text())
+    assert aliases == {"production": "1"}, aliases  # the alias moved back from v3 to v1
+
+    # The following eval sees the rollback: moving an alias is a commit with the git plugin, so an
+    # uncommitted rollback is a dirty tree and a promotable run is refused (exit 4), exactly like
+    # `promote`. Evals themselves stay pinned to the explicit locked version and never follow an
+    # alias (CONTRACT §3: no fallback to an alias or `latest`).
+    assert cli(d, "eval", "--dataset", "smoke", "--stage", "dev")[0] == 4
+    commit(d, "rollback")
+    code, out = cli(d, "eval", "--dataset", "smoke", "--stage", "pr")
+    assert code == 0, out
+    assert out["data"]["runs"][0]["metrics"]["facts/mean"] == 1.0, out
+    assert json.loads((d / ".evalops/store/prompts/support_system/aliases.json").read_text()) == {"production": "1"}
 
     # Budget enforcement
     cfg = (d / "evalops.yaml").read_text().replace("per_run_usd: 5", "per_run_usd: 0.000001")
@@ -166,7 +198,7 @@ def test_full_lifecycle():
     assert cli(d, "eval", "--dataset", "smoke", "--stage", "dev")[0] == 3
     assert cli(d, "eval", "--dataset", "smoke", "--stage", "dev", "--dry-run", "--override-budget")[0] == 0
     code, out = cli(d, "cost")
-    assert code == 0 and out["month_spent_usd"] > 0
+    assert code == 0 and out["data"]["month_spent_usd"] > 0
 
     # Frozen dataset change needs approval; approved change creates a NEW content-addressed snapshot
     g = d / "datasets" / "smoke.jsonl"
@@ -181,13 +213,13 @@ def test_full_lifecycle():
 
     # Capability error: git cannot be a ledger
     code, out = cli(d, "plugins", env={"EVALOPS_ENV": "broken"})
-    assert out["roles"]["ledger"]["ok"] is False
+    assert out["data"]["roles"]["ledger"]["ok"] is False
     assert cli(d, "baseline", env={"EVALOPS_ENV": "broken"})[0] == 6
 
     # Guard catches direct backend calls in project code
     (d / "sneaky.py").write_text("from langfuse import get_client\nget_client().create_prompt(name='x', prompt='y')\n")
     code, out = cli(d, "guard", env={"EVALOPS_ALLOW_FROZEN_CHANGE": "true"})
-    assert code == 4 and any("sneaky.py" in v for v in out["violations"]), out
+    assert code == 4 and any("sneaky.py" in v for v in out["errors"][0]["details"]["violations"]), out
     (d / "sneaky.py").unlink()
     commit(d, "frozen approved")
 
@@ -196,5 +228,5 @@ def test_full_lifecycle():
     assert cli(d, "sync", "all", env=env)[0] == 0
     commit(d, "custom locks")
     code, out = cli(d, "eval", "--dataset", "smoke", "--stage", "dev", "--override-budget", env=env)
-    assert code == 0 and out["plugins"]["tracer"] == "custom_tracer:CountingTracer", out
+    assert code == 0 and out["data"]["plugins"]["tracer"] == "custom_tracer:CountingTracer", out
     shutil.rmtree(d, ignore_errors=True)

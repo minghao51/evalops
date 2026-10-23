@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "sync",
+  "env": "local",
+  "data": {
+    "summary": "registered 1 prompt version(s) in git; commit the lock; synced 1 dataset(s) to git; commit the lock",
+    "prompts": {
+      "summary": "registered 1 prompt version(s) in git; commit the lock",
+      "registered": [
+        "support_system@1"
+      ]
+    },
+    "datasets": {
+      "summary": "synced 1 dataset(s) to git; commit the lock",
+      "synced": [
+        "smoke__ba92db99"
+      ]
+    }
+  },
+  "errors": []
+}

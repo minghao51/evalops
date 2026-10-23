@@ -122,7 +122,7 @@ def test_agent_lifecycle():
     # 1) Record tool cassettes against live tools, then commit them
     code, out = cli(d, "eval", "--dataset", "agent_golden", "--stage", "dev", "--tool-mode", "record")
     assert code == 0, out
-    m = out["runs"][0]["metrics"]
+    m = out["data"]["runs"][0]["metrics"]
     assert m["tool_trajectory/mean"] == 1.0 and m["agent_route/mean"] == 1.0 and m["tool_args/mean"] == 1.0, m
     assert m["trace.tool_calls/mean"] > 0 and m["gen_cost_usd"] > 0, m
     assert (d / "cassettes" / "agent_golden.jsonl").exists()
@@ -130,24 +130,24 @@ def test_agent_lifecycle():
 
     # 2) PR stage replays tools: works fully offline
     code, out = cli(d, "eval", "--dataset", "agent_golden", "--stage", "pr", env=offline)
-    assert code == 0 and out["tool_mode"] == "replay", out
-    m = out["runs"][0]["metrics"]
+    assert code == 0 and out["data"]["tool_mode"] == "replay", out
+    m = out["data"]["runs"][0]["metrics"]
     assert m["error_rate"] == 0.0 and m["tool_replay_misses"] == 0 and m["tool_trajectory/mean"] == 1.0, m
     # cost came from the captured trace with the per-model price: 2 LLM calls x (120 in, 30 out) per row
     rows = 3
     assert abs(m["gen_cost_usd"] - rows * 2 * (120 * 2.5 + 30 * 10.0) / 1e6) < 1e-9, m
 
     code, out = cli(d, "traces", "--row", "00000")
-    tree = out["rows"][0]["tree"]
+    tree = out["data"]["rows"][0]["tree"]
     assert "[agent] supervisor" in tree and "[tool] lookup_order" in tree and "[llm] fake-gpt" in tree, tree
 
     # 3) Main: 3 repeats, reliability gate passes -> promote to production (baseline)
     code, out = cli(d, "eval", "--dataset", "agent_golden", "--stage", "main", env=offline)
-    assert code == 0 and len(out["run_ids"]) == 3, out
-    main_group = out["group"]
+    assert code == 0 and len(out["data"]["run_ids"]) == 3, out
+    main_group = out["data"]["group"]
     code, out = cli(d, "gate")
     assert code == 0, out
-    rel = next(c for c in out["checks"] if c["check"] == "reliability (info)")
+    rel = next(c for c in out["data"]["checks"] if c["check"] == "reliability (info)")
     assert rel["cand_pass_hat_k"] == 1.0 and rel["cand_k"] == 3, rel
     assert cli(d, "promote", "--alias", "production", "--evidence-group", main_group)[0] == 0
     commit(d, "promote")
@@ -161,7 +161,7 @@ def test_agent_lifecycle():
     assert code == 0, out
     code, out = cli(d, "gate")
     assert code == 1, out
-    failed = [c["check"] for c in out["checks"] if not c["passed"]]
+    failed = [c["check"] for c in out["data"]["checks"] if not c["passed"]]
     assert any(c.startswith("pass_hat_k") for c in failed), failed
 
     # 5) Runaway loop: the circuit breaker aborts the run mid-graph (before the next tool executes)
@@ -171,7 +171,7 @@ def test_agent_lifecycle():
     commit(d, "sync loop")
     code, out = cli(d, "eval", "--dataset", "agent_golden", "--stage", "dev", "--tool-mode", "live")
     assert code == 0, out
-    m = out["runs"][0]["metrics"]
+    m = out["data"]["runs"][0]["metrics"]
     assert abs(m["budget_exceeded_rate"] - 2 / 3) < 1e-9 and m["error_rate"] > 0, m
     assert cli(d, "gate")[0] == 1
 
@@ -180,12 +180,12 @@ def test_agent_lifecycle():
         d, "eval", "--dataset", "agent_golden", "--stage", "dev", "--judge-only", "--source-group", main_group
     )
     assert code == 0, out
-    m = out["runs"][0]["metrics"]
+    m = out["data"]["runs"][0]["metrics"]
     assert m["gen_cost_usd"] == 0 and m["tool_trajectory/mean"] == 1.0 and m["agent_route/mean"] == 1.0, m
 
     # 7) Judge calibration against human labels; a broken judge is caught before it can gate anything
     code, out = cli(d, "calibrate", "--dataset", "judge_calibration")
-    assert code == 0 and out["judges"]["helpful"]["agreement"] == 1.0, out
+    assert code == 0 and out["data"]["judges"]["helpful"]["agreement"] == 1.0, out
     code, out = cli(d, "calibrate", "--dataset", "judge_calibration", env={"JUDGE_BROKEN": "1"})
-    assert code == 1 and out["judges"]["helpful"]["agreement"] == 0.0, out
+    assert code == 1 and out["data"]["judges"]["helpful"]["agreement"] == 0.0, out
     shutil.rmtree(d, ignore_errors=True)

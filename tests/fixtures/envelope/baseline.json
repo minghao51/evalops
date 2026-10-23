@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "baseline",
+  "env": "local",
+  "data": {
+    "summary": "no production baseline yet",
+    "baseline": null
+  },
+  "errors": []
+}

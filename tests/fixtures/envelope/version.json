@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "version",
+  "env": "local",
+  "data": {
+    "version": "0.3.0"
+  },
+  "errors": []
+}

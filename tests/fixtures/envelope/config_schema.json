@@ -1,0 +1,937 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "config",
+  "env": "local",
+  "data": {
+    "schema": {
+      "$defs": {
+        "AppHooks": {
+          "additionalProperties": false,
+          "description": "The only app-specific code: four ``module:attribute`` hooks.",
+          "properties": {
+            "behavior_config": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Behavior Config"
+            },
+            "predict_fn": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Predict Fn"
+            },
+            "scorers": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Scorers"
+            },
+            "judge_meta": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Judge Meta"
+            }
+          },
+          "title": "AppHooks",
+          "type": "object"
+        },
+        "CostBudgets": {
+          "additionalProperties": false,
+          "properties": {
+            "per_run_usd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Per Run Usd"
+            },
+            "per_month_usd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Per Month Usd"
+            }
+          },
+          "title": "CostBudgets",
+          "type": "object"
+        },
+        "CostConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "currency": {
+              "default": "USD",
+              "title": "Currency",
+              "type": "string"
+            },
+            "prices_per_1m_tokens": {
+              "$ref": "#/$defs/PricesPerMillionTokens"
+            },
+            "defaults": {
+              "$ref": "#/$defs/CostDefaults"
+            },
+            "budgets": {
+              "$ref": "#/$defs/CostBudgets"
+            }
+          },
+          "title": "CostConfig",
+          "type": "object"
+        },
+        "CostDefaults": {
+          "additionalProperties": false,
+          "properties": {
+            "gen_calls_per_row": {
+              "default": 1,
+              "title": "Gen Calls Per Row",
+              "type": "integer"
+            },
+            "gen_input_tokens_per_row": {
+              "default": 1500,
+              "title": "Gen Input Tokens Per Row",
+              "type": "integer"
+            },
+            "gen_output_tokens_per_row": {
+              "default": 400,
+              "title": "Gen Output Tokens Per Row",
+              "type": "integer"
+            },
+            "judge_input_tokens_per_call": {
+              "default": 2000,
+              "title": "Judge Input Tokens Per Call",
+              "type": "integer"
+            },
+            "judge_output_tokens_per_call": {
+              "default": 200,
+              "title": "Judge Output Tokens Per Call",
+              "type": "integer"
+            }
+          },
+          "title": "CostDefaults",
+          "type": "object"
+        },
+        "DatasetDecl": {
+          "additionalProperties": false,
+          "properties": {
+            "frozen": {
+              "default": false,
+              "title": "Frozen",
+              "type": "boolean"
+            }
+          },
+          "title": "DatasetDecl",
+          "type": "object"
+        },
+        "EvalConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "max_workers": {
+              "default": 4,
+              "title": "Max Workers",
+              "type": "integer"
+            },
+            "max_scorer_workers": {
+              "default": 2,
+              "title": "Max Scorer Workers",
+              "type": "integer"
+            },
+            "retries": {
+              "default": 3,
+              "title": "Retries",
+              "type": "integer"
+            },
+            "backoff_seconds": {
+              "default": 1.0,
+              "title": "Backoff Seconds",
+              "type": "number"
+            },
+            "requests_per_minute": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requests Per Minute"
+            },
+            "async_timeout": {
+              "default": 300.0,
+              "title": "Async Timeout",
+              "type": "number"
+            },
+            "repeats": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "propertyNames": {
+                "enum": [
+                  "dev",
+                  "pr",
+                  "main",
+                  "nightly",
+                  "control"
+                ]
+              },
+              "title": "Repeats",
+              "type": "object"
+            },
+            "row_limits": {
+              "$ref": "#/$defs/RowLimits"
+            }
+          },
+          "title": "EvalConfig",
+          "type": "object"
+        },
+        "GateCostRule": {
+          "additionalProperties": false,
+          "properties": {
+            "max_cost_per_row_increase_pct": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Cost Per Row Increase Pct"
+            },
+            "max_cost_per_row_usd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Cost Per Row Usd"
+            }
+          },
+          "title": "GateCostRule",
+          "type": "object"
+        },
+        "GatesConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "metrics": {
+              "additionalProperties": {
+                "$ref": "#/$defs/MetricRule"
+              },
+              "title": "Metrics",
+              "type": "object"
+            },
+            "cost": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GateCostRule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "reliability": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReliabilityRule"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "title": "GatesConfig",
+          "type": "object"
+        },
+        "GuardConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "exclude": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Exclude"
+            },
+            "eval_dirs": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Eval Dirs"
+            },
+            "allow": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allow"
+            },
+            "forbidden_calls": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Forbidden Calls"
+            }
+          },
+          "title": "GuardConfig",
+          "type": "object"
+        },
+        "JudgeRule": {
+          "additionalProperties": false,
+          "description": "Calibration thresholds for one judge, plus the pin ``judges.<name>.model`` of CONTRACT \u00a76.\n\n``max_mae`` is checked by ``calibrate`` (``mae <= max_mae``) for scalar/ordinal judges; it is\npart of the calibration contract, so it must be a field here (see ``calibrate``'s docstring).\nEvery threshold is *optional*: an omitted key and an explicit ``null`` both mean \"no such gate\",\nand ``calibrate`` emits no check for it instead of comparing a number to nothing.",
+          "properties": {
+            "min_agreement": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Agreement"
+            },
+            "min_kappa": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Kappa"
+            },
+            "max_mae": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Mae"
+            },
+            "label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Label"
+            },
+            "threshold": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Threshold"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model"
+            }
+          },
+          "title": "JudgeRule",
+          "type": "object"
+        },
+        "LimitsConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "max_dataset_rows": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Dataset Rows"
+            }
+          },
+          "title": "LimitsConfig",
+          "type": "object"
+        },
+        "MetricRule": {
+          "additionalProperties": false,
+          "description": "A gate rule for one metric. Exactly these five keys; anything else is a typo.",
+          "properties": {
+            "min": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "max_drop": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Drop"
+            },
+            "max_increase_pct": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Increase Pct"
+            },
+            "min_ci_lower": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Ci Lower"
+            }
+          },
+          "title": "MetricRule",
+          "type": "object"
+        },
+        "PathsConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "prompts": {
+              "default": "prompts",
+              "title": "Prompts",
+              "type": "string"
+            },
+            "datasets": {
+              "default": "datasets",
+              "title": "Datasets",
+              "type": "string"
+            },
+            "locks": {
+              "default": ".evalops",
+              "title": "Locks",
+              "type": "string"
+            },
+            "cassettes": {
+              "default": "cassettes",
+              "title": "Cassettes",
+              "type": "string"
+            }
+          },
+          "title": "PathsConfig",
+          "type": "object"
+        },
+        "PluginsConfig": {
+          "additionalProperties": false,
+          "description": "``plugins.<role>``: the role names are the closed set ``ports.ROLES``.\n\nA role the registry cannot serve used to reach ``Config`` as an unstructured\n\"unknown plugin roles\" error; as a model it is a dotted-path validation issue like any other\n(``plugins.promps``, ``environments.<env>.plugins.promps``).",
+          "properties": {
+            "prompts": {
+              "title": "Prompts",
+              "type": "string"
+            },
+            "datasets": {
+              "title": "Datasets",
+              "type": "string"
+            },
+            "ledger": {
+              "title": "Ledger",
+              "type": "string"
+            },
+            "tracer": {
+              "title": "Tracer",
+              "type": "string"
+            },
+            "evaluator": {
+              "title": "Evaluator",
+              "type": "string"
+            }
+          },
+          "title": "PluginsConfig",
+          "type": "object"
+        },
+        "PricesPerMillionTokens": {
+          "additionalProperties": false,
+          "properties": {
+            "generation": {
+              "$ref": "#/$defs/TokenPrice"
+            },
+            "judge": {
+              "$ref": "#/$defs/TokenPrice"
+            },
+            "models": {
+              "additionalProperties": {
+                "$ref": "#/$defs/TokenPrice"
+              },
+              "title": "Models",
+              "type": "object"
+            }
+          },
+          "title": "PricesPerMillionTokens",
+          "type": "object"
+        },
+        "ReliabilityRule": {
+          "additionalProperties": false,
+          "properties": {
+            "success": {
+              "items": {
+                "$ref": "#/$defs/ReliabilitySuccess"
+              },
+              "title": "Success",
+              "type": "array"
+            },
+            "min_pass_hat_k": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Pass Hat K"
+            },
+            "max_drop_pass_hat_k": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Drop Pass Hat K"
+            }
+          },
+          "title": "ReliabilityRule",
+          "type": "object"
+        },
+        "ReliabilitySuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "metric": {
+              "title": "Metric",
+              "type": "string"
+            },
+            "min": {
+              "default": 1.0,
+              "title": "Min",
+              "type": "number"
+            }
+          },
+          "required": [
+            "metric"
+          ],
+          "title": "ReliabilitySuccess",
+          "type": "object"
+        },
+        "RowLimits": {
+          "additionalProperties": false,
+          "description": "The per-row circuit breaker: exactly the keys the runtime consumes.\n\n``traces/capture.py`` reads ``max_steps`` / ``max_tokens`` / ``max_seconds`` literally and\n``plugins/core.py`` uses ``max_seconds`` as the async timeout, so ``max_step`` (a typo) used to\nbe accepted and silently disabled the limit. Adding a limit means adding a field here and in\nthe runtime (CONTRACT \u00a71.1).",
+          "properties": {
+            "max_steps": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Steps"
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Tokens"
+            },
+            "max_seconds": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Seconds"
+            }
+          },
+          "title": "RowLimits",
+          "type": "object"
+        },
+        "TokenPrice": {
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "default": 0.0,
+              "title": "Input",
+              "type": "number"
+            },
+            "output": {
+              "default": 0.0,
+              "title": "Output",
+              "type": "number"
+            }
+          },
+          "title": "TokenPrice",
+          "type": "object"
+        },
+        "ToolsConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "mode_by_stage": {
+              "additionalProperties": {
+                "enum": [
+                  "live",
+                  "record",
+                  "replay"
+                ],
+                "type": "string"
+              },
+              "propertyNames": {
+                "enum": [
+                  "dev",
+                  "pr",
+                  "main",
+                  "nightly",
+                  "control"
+                ]
+              },
+              "title": "Mode By Stage",
+              "type": "object"
+            },
+            "on_miss": {
+              "default": "error",
+              "enum": [
+                "error",
+                "live"
+              ],
+              "title": "On Miss",
+              "type": "string"
+            }
+          },
+          "title": "ToolsConfig",
+          "type": "object"
+        },
+        "TracesConfig": {
+          "additionalProperties": false,
+          "properties": {
+            "capture": {
+              "default": true,
+              "title": "Capture",
+              "type": "boolean"
+            },
+            "instrument": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Instrument",
+              "type": "array"
+            },
+            "max_payload_chars": {
+              "default": 4000,
+              "title": "Max Payload Chars",
+              "type": "integer"
+            }
+          },
+          "title": "TracesConfig",
+          "type": "object"
+        },
+        "EnvironmentBlock": {
+          "title": "EnvironmentBlock",
+          "description": "Partial overlay for one environments.<name> block: every section is optional.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "title": "Project",
+              "type": "string"
+            },
+            "default_env": {
+              "default": "local",
+              "title": "Default Env",
+              "type": "string"
+            },
+            "plugins": {
+              "$ref": "#/$defs/PluginsConfig"
+            },
+            "plugin_config": {
+              "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Plugin Config",
+              "type": "object"
+            },
+            "paths": {
+              "$ref": "#/$defs/PathsConfig"
+            },
+            "app": {
+              "$ref": "#/$defs/AppHooks"
+            },
+            "datasets": {
+              "additionalProperties": {
+                "$ref": "#/$defs/DatasetDecl"
+              },
+              "title": "Datasets",
+              "type": "object"
+            },
+            "traces": {
+              "$ref": "#/$defs/TracesConfig"
+            },
+            "tools": {
+              "$ref": "#/$defs/ToolsConfig"
+            },
+            "eval": {
+              "$ref": "#/$defs/EvalConfig"
+            },
+            "gates": {
+              "$ref": "#/$defs/GatesConfig"
+            },
+            "judges": {
+              "additionalProperties": {
+                "$ref": "#/$defs/JudgeRule"
+              },
+              "title": "Judges",
+              "type": "object"
+            },
+            "cost": {
+              "$ref": "#/$defs/CostConfig"
+            },
+            "guard": {
+              "$ref": "#/$defs/GuardConfig"
+            },
+            "limits": {
+              "$ref": "#/$defs/LimitsConfig"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "The merged ``evalops.yaml``: top level \u2295 the selected ``environments.<env>`` block.",
+      "properties": {
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "default_env": {
+          "default": "local",
+          "title": "Default Env",
+          "type": "string"
+        },
+        "plugins": {
+          "$ref": "#/$defs/PluginsConfig"
+        },
+        "plugin_config": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Plugin Config",
+          "type": "object"
+        },
+        "environments": {
+          "title": "Environments",
+          "description": "Named overlays selected with EVALOPS_ENV; each is merged over the top level.",
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/EnvironmentBlock"
+          }
+        },
+        "paths": {
+          "$ref": "#/$defs/PathsConfig"
+        },
+        "app": {
+          "$ref": "#/$defs/AppHooks"
+        },
+        "datasets": {
+          "additionalProperties": {
+            "$ref": "#/$defs/DatasetDecl"
+          },
+          "title": "Datasets",
+          "type": "object"
+        },
+        "traces": {
+          "$ref": "#/$defs/TracesConfig"
+        },
+        "tools": {
+          "$ref": "#/$defs/ToolsConfig"
+        },
+        "eval": {
+          "$ref": "#/$defs/EvalConfig"
+        },
+        "gates": {
+          "$ref": "#/$defs/GatesConfig"
+        },
+        "judges": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JudgeRule"
+          },
+          "title": "Judges",
+          "type": "object"
+        },
+        "cost": {
+          "$ref": "#/$defs/CostConfig"
+        },
+        "guard": {
+          "$ref": "#/$defs/GuardConfig"
+        },
+        "limits": {
+          "$ref": "#/$defs/LimitsConfig"
+        }
+      },
+      "required": [
+        "project",
+        "app"
+      ],
+      "title": "evalops configuration",
+      "type": "object",
+      "$schema": "<url>"
+    }
+  },
+  "errors": []
+}

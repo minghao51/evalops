@@ -10,7 +10,7 @@ Version identifiers:
 | Identifier | Value | Meaning |
 |---|---|---|
 | `CONTRACT_VERSION` | `1` | This document |
-| `ENVELOPE_SCHEMA_VERSION` | `1` | `--json` output shape (implemented in WP0.5) |
+| `ENVELOPE_SCHEMA_VERSION` | `1` | `--json` output shape (frozen, WP0.5) |
 | `FORMAT_VERSION` | `1` | Persisted artifacts (implemented in WP0.4) |
 
 Where this document describes a target that a later WP implements, the WP number is named. The
@@ -44,6 +44,11 @@ Rules:
 4. `7` is raised when reading, never when writing: writers always emit `FORMAT_VERSION`.
 5. New codes may only be added by a new ADR; existing meanings are append-only.
 6. `argparse` usage errors are normalized to `2`; `--help` and `--version` are `0`.
+
+The mapping is asserted, one case per code `0`–`7`, by
+`tests/unit/test_envelope.py::test_exit_code_matrix_zero_to_seven`, which checks the process exit
+code and `envelope["code"]` together. That matrix is a code-path sample, not a per-command claim:
+coverage of individual commands is stated in §2.
 
 ### 1.1 Configuration (`evalops.yaml`)
 
@@ -104,7 +109,7 @@ nothing else; diagnostics go to stderr. Without it, human output is free-form an
 | `code` | integer | Always present. Equals the process exit code (`0` on success). |
 | `schema_version` | integer | Always present. `1` for this envelope. |
 | `command` | string | Always present. CLI subcommand (`plugins`, `guard`, `sync`, `plan`, `eval`, `gate`, …). |
-| `env` | string | Always present. Resolved `EVALOPS_ENV` / `default_env`. |
+| `env` | string | Always present. The **resolved** environment: `EVALOPS_ENV`, else `default_env` from the config, else `local`. Envelopes built before the config loads (`--version`, argparse errors) resolve it the same way (§2), and plan/sync/... report the env they actually ran in. |
 | `data` | object | Always present, never `null`. Command-specific payload; `{}` when there is none. |
 | `errors` | array | Always present. Empty on success. Each entry has `code` (int), `message` (string), optional `hint` (string) and `details` (object). |
 
@@ -117,8 +122,49 @@ Evolution rules:
 - v0 compatibility: evalops ≤ 0.3 emitted a legacy shape (payload spread at top level, `error`
   string, `code` only on failures, no `schema_version`/`command`/`data`/`errors`). Readers may
   accept the legacy shape until v1.0. Writers emit v1 only (WP0.5).
-- WP0.5 stores one golden snapshot per command under `tests/contract/envelope/` and asserts the
-  exit-code matrix `0`–`7`.
+- Frozen (WP0.5): the deterministic commands each have a golden snapshot under
+  `tests/fixtures/envelope/`, produced from one reproducible temp project built by the shared
+  fixture in `tests/unit/test_envelope.py` (`src/evalops/envelope.py` holds `SCHEMA_VERSION` and the
+  exit-code matrix). The snapshotted commands are exactly:
+  `version`, `plugins`, `doctor`, `guard`, `baseline`, `cost`, `sync` (ok and `--check` failure),
+  `plan`, `eval` (run ids, groups, timings and costs masked), `gate` (pass and fail), `traces`,
+  `config validate` (ok and dotted-path failure), `config schema`, `config explain`.
+  No other command has a golden. Stateful or credentialed commands cannot be reproduced offline from
+  a temp project, so each one is covered by a test that does run:
+  - `promote` and `rollback`: `tests/integration/test_e2e_local.py` promotes a main-stage evidence
+    group to `production`, then `rollback --alias production --prompt … --version …` moves the alias
+    back, and the following eval sees the uncommitted alias move (exit 4) before it is committed.
+  - `calibrate`: `tests/integration/test_e2e_agent.py` (agreement on `judge_calibration`, then a
+    broken judge is caught at exit 1) and `tests/unit/test_config_models.py` (`min_agreement`,
+    `max_mae` and the `mae <= max_mae` threshold).
+  - Evals against a vendor backend (MLflow, Langfuse, LangSmith, Logfire) are **not** covered yet.
+    They are deferred to the phase-3 contract tests (`tests/contract/`, `@pytest.mark.contract`,
+    excluded by default because they need docker-local services); nothing in this document claims
+    they are tested until that suite exists.
+- The goldens **pin** `env` to the environment the scenario selected instead of masking it, and the
+  evalops `version` is not masked either, so running under the wrong `EVALOPS_ENV` or emitting a
+  wrong version fails the snapshot. Masked: per-run identity (`group`, `run_id`, `trace_id`,
+  `git_sha`, `app_version`, and the same tokens inside free-text summaries), absolute filesystem
+  paths, and cost/timing numbers (prices and the clock are not contract). A relative file name such
+  as `broken_config.yaml` and a dotted key path such as `gates.metrics.facts/mean.minn` stay
+  visible: naming the offending file/key is part of the contract.
+- A parse error (`argparse`: unknown flag, invalid choice, missing sub-command) is exit `2` **with**
+  a code-2 envelope; the message is argparse's own text and names the offending argument, and
+  `command` is the sub-command named on the command line (`cli` when none can be recognized).
+  `--help` and `--version` stay exit `0` (`--json --version` is a normal version envelope). A
+  sub-command's own `--version` option (`rollback --version 3`) is not the top-level flag: the flag
+  only counts before the sub-command token.
+- A malformed `evalops.yaml` (invalid YAML) is exit `2` with a code-2 envelope whose message names
+  the file, never exit `5`: the config cannot be read, which is a usage/config error.
+- In `--json` mode stdout carries the envelope and nothing else. Capture is at the **file-descriptor**
+  level, not `sys.stdout`: a hook or plugin that writes to `sys.__stdout__` or spawns a child
+  process is captured just like a plain `print`, and its text is forwarded to stderr
+  (`test_fd_level_capture_stops_a_hook_bypassing_sys_stdout`).
+- `env` is resolved, not defaulted: `EVALOPS_ENV`, else the project's `default_env`. The envelopes
+  that are built before the config is loaded (`--version`, argparse errors) resolve it best-effort
+  from the same file (`--config` / `EVALOPS_CONFIG` / `evalops.yaml` upward) and fall back to `local`
+  when no config can be read; env resolution never turns those paths into a failure
+  (`test_version_and_usage_envelopes_report_the_projects_default_env`).
 
 ## 3. Port contracts
 

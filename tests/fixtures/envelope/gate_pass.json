@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "gate",
+  "env": "local",
+  "data": {
+    "summary": "gate passed for group g1",
+    "group": "<id>",
+    "baseline_group": null,
+    "checks": [
+      {
+        "check": "facts/mean >= 0.5",
+        "passed": true,
+        "candidate": 0.9
+      }
+    ],
+    "report": "<path>"
+  },
+  "errors": []
+}

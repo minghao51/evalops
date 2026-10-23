@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "config",
+  "env": "local",
+  "data": {
+    "env": "local",
+    "path": "<path>",
+    "errors": []
+  },
+  "errors": []
+}

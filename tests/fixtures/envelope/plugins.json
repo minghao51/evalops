@@ -1,0 +1,43 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "plugins",
+  "env": "local",
+  "data": {
+    "summary": "env 'local'",
+    "roles": {
+      "prompts": {
+        "plugin": "git",
+        "ok": true
+      },
+      "datasets": {
+        "plugin": "git",
+        "ok": true
+      },
+      "ledger": {
+        "plugin": "sql",
+        "ok": true
+      },
+      "tracer": {
+        "plugin": "none",
+        "ok": true
+      },
+      "evaluator": {
+        "plugin": "core",
+        "ok": true
+      }
+    },
+    "available": {
+      "git": "evalops.plugins.git:GitPlugin",
+      "sql": "evalops.plugins.sql:SqlPlugin",
+      "core": "evalops.plugins.core:CorePlugin",
+      "none": "evalops.plugins.core:CorePlugin",
+      "mlflow": "evalops.plugins.mlflow:MlflowPlugin",
+      "langfuse": "evalops.plugins.langfuse:LangfusePlugin",
+      "langsmith": "evalops.plugins.langsmith:LangsmithPlugin",
+      "logfire": "evalops.plugins.logfire:LogfirePlugin"
+    }
+  },
+  "errors": []
+}

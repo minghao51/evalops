@@ -65,6 +65,23 @@ evalops plan --dataset smoke --stage dev
 evalops eval --dataset smoke --stage dev
 evalops gate
 ```
+With `--json`, stdout is exactly **one** envelope document and the process exit code equals `code`
+([CONTRACT §2](docs/CONTRACT.md#2-the---json-envelope-v1)). On `evalops --json guard`:
+
+```json
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "guard",
+  "env": "local",
+  "data": {"summary": "guard passed", "violations": []},
+  "errors": []
+}
+```
+
+On a failure `code` is `1`–`7` (never `0`), and `errors[0]` carries `{code, message, hint?, details?}`.
+
 To switch backends, run `EVALOPS_ENV=mlflow|databricks|langfuse|langsmith|logfire`, install the matching extra (for example `pip install -e ".[langfuse]"`), and run `evalops doctor`.
 
 ## Pipeline

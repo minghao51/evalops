@@ -1,22 +1,51 @@
 """evalops CLI: one interface for humans, any CI system, and coding agents, over any backend.
 
-Every command supports --json and uses stable exit codes:
-  0 ok | 1 gate failed | 2 usage/config | 3 budget exceeded | 4 guard violation | 5 runtime | 6 unsupported by plugin
+Every command supports --json and uses stable exit codes (docs/CONTRACT.md §1):
+  0 ok | 1 gate failed | 2 usage/config | 3 budget exceeded | 4 guard violation | 5 runtime
+  | 6 unsupported by plugin | 7 contract/format mismatch
+
+With --json, stdout is exactly one envelope document (docs/CONTRACT.md §2); the process exit code
+always equals `envelope["code"]`. A parse error (unknown flag, bad choice) is a code-2 envelope
+too, and anything a dispatch hook prints is forwarded to stderr so it cannot corrupt the document.
 """
 
 import argparse
+import contextlib
+import os
 import sys
+import tempfile
+from collections.abc import Callable
+from typing import Any, NoReturn
 
-from . import config as config_mod
-from .util import EXIT_GATE_FAILED, EXIT_OK, EXIT_RUNTIME, EvalOpsError, emit
+from . import __version__, config as config_mod
+from . import envelope
+from .util import EXIT_OK, EXIT_USAGE, EvalOpsError
+
+JSON_FLAG = "--json"
+VERSION_FLAG = "--version"
 
 
-def build_parser():
-    p = argparse.ArgumentParser(
-        prog="evalops", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+class _ArgumentParser(argparse.ArgumentParser):
+    """``argparse`` with one change: a parse error raises instead of printing and exiting.
+
+    Only ``error()`` is overridden, so ``--help`` and ``--version`` keep argparse's own exit 0.
+    The usage line still goes to stderr for humans; ``main`` renders the code-2 envelope (argparse's
+    message text is used verbatim, so the contract does not fork argparse's phrasing). The message
+    names the offending argument (``unrecognized arguments: --made-up-flag``).
+    """
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        raise EvalOpsError(f"{self.prog}: error: {message}", EXIT_USAGE)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = _ArgumentParser(prog="evalops", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", help="path to evalops.yaml (default: search upward from cwd)")
-    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.add_argument("--json", action="store_true", help="machine-readable output (one envelope document)")
+    # `--version` is answered in main() before the parser runs, so it works without a config file
+    # and can honour --json; the action here only documents the flag and covers `--help`.
+    p.add_argument("--version", action="version", version=f"evalops {__version__}", help="print the version and exit")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("plugins", help="show configured plugins per role and all available plugins")
@@ -155,26 +184,195 @@ def dispatch(args, cfg) -> dict:
     if args.cmd == "baseline":
         return run.baseline(cfg)
     if args.cmd == "cost":
-        spent = cost.month_spend(Registry(cfg).get("ledger"))
+        spent = float(cost.month_spend(Registry(cfg).get("ledger")))
         cap = cfg.section("cost").get("budgets", {}).get("per_month_usd")
         return {"summary": f"month to date ${spent} of ${cap}", "month_spent_usd": spent, "per_month_usd": cap}
     raise EvalOpsError(f"unknown command {args.cmd}")
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    if _version_requested(parser, argv):  # before the parser: needs no config file and honours --json
+        return _print_version(as_json=JSON_FLAG in argv, env=_early_env(argv))
+    try:
+        args = parser.parse_args(argv)
+    except EvalOpsError as e:  # a parse error: exit 2 *with* an envelope, not a bare argparse exit
+        env = _early_env(argv, e)
+        return _finish(envelope.from_error(_command_from_argv(parser, argv), env, e), JSON_FLAG in argv)
+    command = args.cmd
     try:
         cfg = config_mod.load(args.config)
-        result = dispatch(args, cfg)
-        ok = result.get("ok", True)
-        emit({"ok": ok, "env": cfg.env, **result}, args.json)
-        return EXIT_OK if ok else EXIT_GATE_FAILED
+    except Exception as e:  # noqa: BLE001 - a broken config must still produce a valid envelope
+        return _finish(envelope.from_error(command, _early_env(argv, e), e), args.json)
+    if args.json:
+        # A hook that prints must not corrupt the document: file descriptor 1 is captured for the
+        # whole dispatch (so `sys.__stdout__` and child processes are caught too) and the captured
+        # text is forwarded to stderr, leaving the envelope as the only thing on stdout.
+        captured, env_dict = _captured_stdout(lambda: _dispatch_envelope(args, cfg))
+        _forward_to_stderr(captured)
+    else:
+        env_dict = _dispatch_envelope(args, cfg)
+    return _finish(env_dict, args.json)
+
+
+def _captured_stdout(run: Callable[[], dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    """Run ``run`` with **both** stdout levels redirected -> ``(captured, result)``.
+
+    Two bypasses have to be closed for the envelope to stay the only thing on stdout:
+
+    * a hook writing to ``sys.__stdout__`` or spawning a child that inherits the descriptor never
+      touches ``sys.stdout``, so file descriptor 1 is redirected to a temp file (``os.dup2``);
+    * a hook writing to a ``sys.stdout`` that is a *separate stream* (pytest ``capsys``, an
+      embedder's ``contextlib.redirect_stdout``) never touches the descriptor, so ``sys.stdout`` is
+      rebound to ``sys.stderr`` for the whole dispatch.
+
+    Both are restored before ``main`` renders the envelope to the real ``sys.stdout``; the captured
+    descriptor bytes are appended to stderr afterwards, in one diagnostic stream.
+    """
+    sys.stdout.flush()
+    outer_stdout = sys.stdout
+    with tempfile.TemporaryFile(mode="w+b") as captured:
+        saved = os.dup(1)
+        try:
+            os.dup2(captured.fileno(), 1)
+            try:
+                with contextlib.redirect_stdout(sys.stderr):
+                    try:
+                        result = run()
+                    finally:
+                        # Flush every Python-level stdout buffer while fd 1 still points at the temp
+                        # file, so nothing a hook left buffered lands in the envelope afterwards.
+                        for stream in (sys.stderr, outer_stdout, sys.__stdout__):
+                            if stream is not None:  # sys.__stdout__ is None on a detached interpreter
+                                with contextlib.suppress(Exception):
+                                    stream.flush()
+            finally:
+                os.dup2(saved, 1)
+        finally:
+            os.close(saved)
+        captured.seek(0)
+        return captured.read().decode("utf-8", "replace"), result
+
+
+def _dispatch_envelope(args, cfg) -> dict[str, Any]:
+    """Run ``dispatch`` and always return an envelope: usage errors, crashes and gate failures."""
+    try:
+        return envelope.from_result(args.cmd, cfg.env, dispatch(args, cfg))
     except EvalOpsError as e:
-        emit({"ok": False, "error": str(e), "code": e.code, **e.details}, args.json)
-        return e.code
-    except Exception as e:  # noqa: BLE001
-        emit({"ok": False, "error": f"{type(e).__name__}: {e}", "code": EXIT_RUNTIME}, args.json)
-        return EXIT_RUNTIME
+        return envelope.from_error(args.cmd, cfg.env, e)
+    except Exception as e:  # noqa: BLE001 - unexpected failures are exit 5, never a traceback on stdout
+        return envelope.failure(args.cmd, cfg.env, envelope.EXIT_RUNTIME, f"{type(e).__name__}: {e}")
+
+
+def _forward_to_stderr(text: str) -> None:
+    """JSON mode: anything dispatch printed is a diagnostic, so it belongs on stderr."""
+    if not text:
+        return
+    sys.stderr.write(text)
+    if not text.endswith("\n"):
+        sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
+def _subcommand_names(parser: argparse.ArgumentParser) -> set[str]:
+    """Every sub-command name the parser knows (the subparsers action is the only one with dict choices)."""
+    names: set[str] = set()
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if isinstance(choices, dict):
+            names.update(choices)
+    return names
+
+
+def _top_level_tokens(argv: list[str]) -> list[str]:
+    """The argv tokens the *top-level* parser reads, with every option value consumed.
+
+    A ``--config`` value is a file name, not a sub-command: ``evalops --config rollback --version``
+    with a config file called ``rollback`` must still answer the top-level ``--version``. The scan
+    therefore skips ``--config X`` / ``--config=X`` entirely, treats every other ``-``-prefixed
+    token as a flag (the parser reports an unknown one), and stops at the first non-option token:
+    that token is the real sub-command, and nothing after it belongs to the top level.
+    """
+    tokens: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--config":
+            index += 2  # the next token is the value, whatever it happens to look like
+            continue
+        if token.startswith("--config="):
+            index += 1
+            continue
+        tokens.append(token)
+        index += 1
+        if not token.startswith("-"):
+            break  # the first non-option token is the sub-command
+    return tokens
+
+
+def _version_requested(parser: argparse.ArgumentParser, argv: list[str]) -> bool:
+    """True when ``--version`` is the top-level flag rather than a sub-command's own option.
+
+    ``evalops rollback --alias production --prompt p --version 1`` passes the version to roll back
+    to, so the flag only counts before the sub-command token; otherwise it would print the evalops
+    version instead of running the command.
+    """
+    names = _subcommand_names(parser)
+    for token in _top_level_tokens(argv):
+        if token in names:
+            return False
+        if token == VERSION_FLAG:
+            return True
+    return False
+
+
+def _command_from_argv(parser: argparse.ArgumentParser, argv: list[str]) -> str:
+    """Best-effort ``command`` for the envelope when parsing itself failed.
+
+    The first *top-level* argument that is a known subcommand wins (``evalops --json plugins
+    --bad`` -> ``plugins``); an option value is never a subcommand (``--config rollback``), and a
+    failure before any subcommand (``evalops --json``) reports ``cli``.
+    """
+    names = _subcommand_names(parser)
+    return next((token for token in _top_level_tokens(argv) if token in names), "cli")
+
+
+def _finish(env_dict: dict[str, Any], as_json: bool) -> int:
+    """Render the envelope and return its code, so the process exit code is the envelope code."""
+    envelope.render(env_dict, as_json, sys.stdout)
+    return int(env_dict["code"])
+
+
+def _print_version(as_json: bool, env: str) -> int:
+    if as_json:
+        envelope.render(envelope.success("version", env, {"version": __version__}), True, sys.stdout)
+    else:
+        print(f"evalops {__version__}")
+    return EXIT_OK
+
+
+def _config_from_argv(argv: list[str]) -> str | None:
+    """``--config PATH`` / ``--config=PATH`` from raw argv (early paths run before argparse)."""
+    for index, token in enumerate(argv):
+        if token == "--config":
+            return argv[index + 1] if index + 1 < len(argv) else None
+        if token.startswith("--config="):
+            return token.split("=", 1)[1]
+    return None
+
+
+def _early_env(argv: list[str], exc: BaseException | None = None) -> str:
+    """The env for an envelope built before (or without) a loaded ``Config`` (CONTRACT.md §2).
+
+    A failure that got far enough to validate the config carries the resolved env in its details;
+    that wins. Otherwise resolve it best-effort the way ``load()`` finds the file, so `--version`
+    and argparse errors report the project's `default_env` instead of a hard-coded `local`.
+    """
+    details = getattr(exc, "details", None) or {}
+    if details.get("env"):
+        return str(details["env"])
+    return config_mod.resolve_env(_config_from_argv(argv))
 
 
 if __name__ == "__main__":

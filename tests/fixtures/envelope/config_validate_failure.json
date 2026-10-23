@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "code": 2,
+  "schema_version": 1,
+  "command": "config",
+  "env": "local",
+  "data": {},
+  "errors": [
+    {
+      "code": 2,
+      "message": "invalid evalops.yaml: gates.metrics.facts/mean.minn: Extra inputs are not permitted",
+      "details": {
+        "env": "local",
+        "path": "broken_config.yaml",
+        "errors": [
+          {
+            "path": "gates.metrics.facts/mean.minn",
+            "message": "Extra inputs are not permitted"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "eval",
+  "env": "local",
+  "data": {
+    "summary": "dev eval of <id> on smoke: 1 run(s), $<n> actual vs $<n> est",
+    "group": "<id>",
+    "app_version": "<id>",
+    "stage": "dev",
+    "dataset": "smoke",
+    "env": "local",
+    "kind": "eval",
+    "tool_mode": "live",
+    "plugins": {
+      "prompts": "git",
+      "datasets": "git",
+      "ledger": "sql",
+      "tracer": "none",
+      "evaluator": "core"
+    },
+    "run_ids": [
+      "<id>"
+    ],
+    "runs": [
+      {
+        "run_id": "<id>",
+        "metrics": {
+          "facts/mean": 1.0,
+          "helpful/mean": 1.0,
+          "error_rate": 0.0,
+          "budget_exceeded_rate": 0.0,
+          "gen_input_tokens": 210,
+          "gen_output_tokens": 50,
+          "gen_input_tokens_per_row": 210.0,
+          "gen_output_tokens_per_row": 50.0,
+          "gen_cost_usd": "<n>",
+          "judge_cost_usd_est": "<n>",
+          "total_cost_usd": "<n>",
+          "cost_per_row_usd": "<n>",
+          "rows_missing_usage": 0,
+          "tool_replay_misses": 0
+        },
+        "errors": 0,
+        "native_ref": null
+      }
+    ],
+    "cost": {
+      "estimate_usd": "<n>",
+      "actual_usd": "<n>",
+      "budget": {
+        "estimate_usd": "<n>",
+        "per_run_usd": "<n>",
+        "month_spent_usd": "<n>",
+        "per_month_usd": "<n>",
+        "override": false,
+        "problems": []
+      }
+    }
+  },
+  "errors": []
+}

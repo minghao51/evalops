@@ -570,7 +570,7 @@ def test_traces_command_exits_7_on_a_future_version_last_eval():
 
         code, envelope = _run_cli(root, "traces")
         assert code == EXIT_CONTRACT == 7, (code, envelope)
-        assert envelope["ok"] is False and "last_eval.json" in envelope["error"]
+        assert envelope["ok"] is False and "last_eval.json" in envelope["errors"][0]["message"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -607,7 +607,7 @@ def test_gate_command_exits_7_on_a_future_version_rows_artifact():
 
         code, envelope = _run_cli(root, "gate", "--group", out["group"])
         assert code == EXIT_CONTRACT == 7, (code, envelope)
-        assert envelope["ok"] is False and "evalops/rows.jsonl" in envelope["error"]
+        assert envelope["ok"] is False and "evalops/rows.jsonl" in envelope["errors"][0]["message"]
         # no gate verdict was recorded for the unreadable group
         assert not ledger_mod.MemoryLedger.runs[run_id]["tags"].get("evalops.gate")
     finally:

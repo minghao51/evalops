@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "cost",
+  "env": "local",
+  "data": {
+    "summary": "month to date $<n> of $<n>",
+    "month_spent_usd": "<n>",
+    "per_month_usd": "<n>"
+  },
+  "errors": []
+}

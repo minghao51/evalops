@@ -18,7 +18,8 @@ Validation runs on the merged document (env blocks are partial by design); every
 block you are not using is still an error. Problems are reported as ``path: message`` with the
 full dotted key path and raise ``EvalOpsError(EXIT_USAGE)``; the details carry
 ``{"env", "path", "errors": [{"path", "message"}]}`` so ``--json`` callers get structured output
-even before ``dispatch`` runs.
+even before ``dispatch`` runs. A document that is not valid YAML at all is the same kind of
+usage error (exit 2, not the exit 5 an unhandled ``yaml.YAMLError`` would produce).
 
 ``explain`` provenance is deliberately simple and total over the top-level sections: a section the
 env block sets is ``env:<name>``, a section that comes from the file is ``top``, a section (or a
@@ -57,6 +58,7 @@ __all__ = [
     "config_schema",
     "import_attr",
     "load",
+    "resolve_env",
     "run_config_command",
     "schema_text",
     "validate_sections",
@@ -237,9 +239,41 @@ def import_attr(spec: str, root: pathlib.Path, label: str) -> Callable[..., Any]
         raise EvalOpsError(f"cannot load {label}='{spec}': {e}", EXIT_USAGE) from e
 
 
+def resolve_env(path: str | None = None) -> str:
+    """Best-effort resolved environment for paths that run before (or without) a ``Config``.
+
+    CONTRACT.md §2 says the envelope's ``env`` is the *resolved* environment, so ``--version`` and
+    argparse errors must report the same value a loaded ``Config`` would: ``EVALOPS_ENV`` wins, else
+    the project's ``default_env`` read from the file ``load()`` would use (``--config`` /
+    ``EVALOPS_CONFIG``, else ``evalops.yaml`` upward), else ``local``.
+
+    It never raises. A version or usage path must not turn into a failure because the config is
+    missing, unreadable or malformed: those paths already report their own verdict. The whole
+    resolution, including the expansion, is inside one ``try``: a recursive YAML alias
+    (``default_env: &loop [*loop]``) raises ``RecursionError`` from ``_expand``, and only a string
+    may be expanded at all, so a non-string ``default_env`` is ``local`` rather than coerced.
+    """
+    env = os.getenv("EVALOPS_ENV")
+    if env:
+        return env
+    try:
+        raw = yaml.safe_load(find_config(path).read_text())
+        default = raw.get("default_env") if isinstance(raw, dict) else None
+        if not isinstance(default, str):
+            return "local"
+        expanded = _expand(default)
+        return expanded if isinstance(expanded, str) and expanded else "local"
+    except Exception:  # noqa: BLE001 - best effort: a version/usage path must not fail here
+        return "local"
+
+
 def load(path: str | None = None) -> Config:
     config_path = find_config(path)
-    document = _expand(yaml.safe_load(config_path.read_text()) or {})
+    try:
+        raw = yaml.safe_load(config_path.read_text())
+    except yaml.YAMLError as e:  # malformed YAML is a usage error (exit 2), never an exit-5 crash
+        raise EvalOpsError(f"{config_path}: invalid YAML: {e}", EXIT_USAGE, {"path": str(config_path)}) from e
+    document = _expand(raw or {})
     if not isinstance(document, dict):
         raise EvalOpsError(f"{config_path}: evalops.yaml must be a mapping of keys to values", EXIT_USAGE)
     return Config(document, config_path.parent.resolve(), source=config_path)
@@ -248,17 +282,24 @@ def load(path: str | None = None) -> Config:
 def run_config_command(cfg: Config, action: str) -> dict[str, Any]:
     """Implement ``evalops config validate|schema|explain`` (arg ``action``).
 
+    Returns the **internal dispatch payload**, not the envelope: ``main`` wraps whatever comes back
+    in ``data`` (``envelope.from_result``), so the final CLI JSON nests it one level deeper.
+
     ``validate``: because ``Config`` validates on construction, an invalid file never reaches this
     function — ``main`` reports exit 2 with ``{"env", "path", "errors": [{"path", "message"}]}``
     in the error details. Reaching here means the file is valid, so the payload is
-    ``{"ok": True, "env", "path", "errors": []}``.
+    ``{"ok": True, "env", "path", "errors": []}``; in the envelope those keys appear under
+    ``data``, and the ``ok`` flag is lifted to the envelope top level (``data.ok`` is dropped).
 
-    ``schema``: ``{"schema": <JSON Schema draft 2020-12>}`` — keyed so ``main``'s ``ok``/``env``
-    wrapper cannot collide with the schema's own keys. ``make schema`` writes the raw schema. Note
-    that ``main`` loads the config before dispatching, so ``config schema`` also requires a readable
-    ``evalops.yaml`` — the schema is never emitted for a broken repository.
+    ``schema``: ``{"schema": <JSON Schema draft 2020-12>}`` — keyed so the envelope's ``ok``/``env``
+    wrapper cannot collide with the schema's own keys; as CLI JSON that is ``data.schema``.
+    ``make schema`` writes the raw schema. Note that ``main`` loads the config before dispatching, so
+    ``config schema`` also requires a readable ``evalops.yaml`` — the schema is never emitted for a
+    broken repository.
 
-    ``explain``: ``{"data": <merged dict>, "provenance": {...}}``.
+    ``explain``: ``{"data": <merged config dict>, "provenance": {...}}``. The inner ``data`` key is
+    the merged document and is deliberately *not* renamed: as CLI JSON it reads ``data.data``
+    (envelope payload) plus ``data.provenance``.
     """
     if action == "validate":
         return {"ok": True, "env": cfg.env, "path": str(cfg.source or ""), "errors": []}

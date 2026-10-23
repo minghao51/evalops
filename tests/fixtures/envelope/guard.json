@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "guard",
+  "env": "local",
+  "data": {
+    "summary": "guard passed",
+    "violations": []
+  },
+  "errors": []
+}

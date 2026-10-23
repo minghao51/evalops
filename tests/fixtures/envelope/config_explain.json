@@ -1,0 +1,80 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "config",
+  "env": "local",
+  "data": {
+    "data": {
+      "project": "envelope",
+      "default_env": "local",
+      "plugins": {
+        "prompts": "git",
+        "datasets": "git",
+        "ledger": "sql",
+        "tracer": "none",
+        "evaluator": "core"
+      },
+      "app": {
+        "behavior_config": "fake_app:behavior_config",
+        "predict_fn": "fake_app:build_predict_fn",
+        "scorers": "fake_app:build_scorers",
+        "judge_meta": "fake_app:judge_meta"
+      },
+      "datasets": {
+        "smoke": {
+          "frozen": true
+        }
+      },
+      "eval": {
+        "max_workers": 2,
+        "retries": 1,
+        "backoff_seconds": 0.01
+      },
+      "cost": {
+        "prices_per_1m_tokens": {
+          "generation": {
+            "input": 1.0,
+            "output": 4.0
+          },
+          "judge": {
+            "input": 1.0,
+            "output": 1.0
+          }
+        },
+        "budgets": {
+          "per_run_usd": "<n>",
+          "per_month_usd": "<n>"
+        }
+      },
+      "guard": {
+        "exclude": [
+          ".git",
+          "src"
+        ]
+      }
+    },
+    "provenance": {
+      "app": "top",
+      "cost": "top",
+      "datasets": "top",
+      "default_env": "top",
+      "eval": "top",
+      "gates": "default",
+      "guard": "top",
+      "judges": "default",
+      "limits": "default",
+      "paths": "default",
+      "paths.cassettes": "default",
+      "paths.datasets": "default",
+      "paths.locks": "default",
+      "paths.prompts": "default",
+      "plugin_config": "default",
+      "plugins": "top",
+      "project": "top",
+      "tools": "default",
+      "traces": "default"
+    }
+  },
+  "errors": []
+}

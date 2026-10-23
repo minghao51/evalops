@@ -1,0 +1,26 @@
+{
+  "ok": false,
+  "code": 1,
+  "schema_version": 1,
+  "command": "gate",
+  "env": "local",
+  "data": {
+    "summary": "gate FAILED for group g1",
+    "group": "<id>",
+    "baseline_group": null,
+    "checks": [
+      {
+        "check": "facts/mean >= 0.95",
+        "passed": false,
+        "candidate": 0.9
+      }
+    ],
+    "report": "<path>"
+  },
+  "errors": [
+    {
+      "code": 1,
+      "message": "gate FAILED for group g1"
+    }
+  ]
+}

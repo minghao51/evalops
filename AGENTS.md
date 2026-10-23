@@ -11,6 +11,7 @@ The `evalops` CLI is the **only** interface for prompts, datasets, evaluations, 
   - `4` guard violation
   - `5` runtime error
   - `6` unsupported by the configured plugin
+  - `7` contract/format mismatch (a persisted artifact declares a schema_version this evalops does not understand)
 - Set `EVALOPS_ACTOR=agent:<your-name>`. Use `EVALOPS_ENV=local` unless the user says otherwise. The `local` env needs no external services.
 - Run `evalops plan` before `evalops eval`, and tell the user the estimated cost. On exit 3, stop and ask the user.
 - Iterate on the `smoke` dataset. Use `golden_regression` only when asked.

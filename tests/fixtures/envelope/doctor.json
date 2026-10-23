@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "doctor",
+  "env": "local",
+  "data": {
+    "summary": "doctor ok for env 'local'",
+    "roles": {
+      "prompts": {
+        "plugin": "git",
+        "ok": true
+      },
+      "datasets": {
+        "plugin": "git",
+        "ok": true
+      },
+      "ledger": {
+        "plugin": "sql",
+        "ok": true
+      },
+      "tracer": {
+        "plugin": "core",
+        "ok": true
+      },
+      "evaluator": {
+        "plugin": "core",
+        "ok": true
+      }
+    }
+  },
+  "errors": []
+}

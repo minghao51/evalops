@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "traces",
+  "env": "local",
+  "data": {
+    "summary": "1 row(s) from run <id>",
+    "rows": [
+      {
+        "row_id": "00000",
+        "inputs": {
+          "question": "How do I reset my password?"
+        },
+        "scores": {
+          "facts": 1.0,
+          "helpful": 1.0
+        },
+        "error": null,
+        "trace_metrics": {},
+        "tree": null
+      }
+    ]
+  },
+  "errors": []
+}
