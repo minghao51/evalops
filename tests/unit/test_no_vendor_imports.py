@@ -24,10 +24,12 @@ walrus, f-strings, starred unpacking, and any call not rooted at ``warnings``/``
 Scope of the claim: this is a whitelist of syntactic shapes, and it does **not** prove that an
 accepted handler cannot raise. A name or attribute in an accepted shape can still fail
 (``x = NEVER_DEFINED`` -> ``NameError``, ``obj.attr`` -> ``AttributeError``), and a locally bound
-``warnings`` is trusted by name. Those are static-analysis concerns, not import-shape concerns:
-ruff ``F821`` and mypy already reject undefined names, and this guard's narrower job is to prove the
-vendor import is not *structurally* mandatory -- no handler re-raises, calls non-reporting code, or
-runs control flow/arithmetic that hides work. Probes at the bottom pin that boundary explicitly.
+``warnings`` is trusted by name. Those are static-analysis concerns, not import-shape concerns, and
+they are only *partly* covered elsewhere: ruff ``F821`` catches undefined names, and mypy catches
+attributes it can resolve statically; a dynamically typed attribute can still fail at runtime with
+nothing reporting it. The guard's narrower job is to prove the vendor import is not *structurally*
+mandatory -- no handler re-raises, calls non-reporting code, unpacks, or runs control
+flow/arithmetic that hides work. Probes at the bottom pin that boundary explicitly.
 
 Direction of error: where the shape whitelist is unsure it rejects, so it can reject a legitimate
 fallback (an f-string in a warning message, a local ``logger`` alias) rather than accept a
@@ -149,10 +151,11 @@ def _expr_is_safe(node: ast.expr | None) -> bool:
     """True when an expression is built only from the whitelisted shapes.
 
     This is a shape check, **not** a no-raise proof: an accepted name can be unbound (NameError)
-    and an accepted attribute can be missing (AttributeError); those are caught by ruff ``F821``
-    and mypy, not here (see the module docstring's scope paragraph). What it does guarantee is that
-    no fallible *work* is hidden in an accepted shape: arithmetic, comparisons, subscripting,
-    calls to non-reporting code, comprehensions and the rest are rejected by node type.
+    and an accepted attribute can be missing (AttributeError). ruff ``F821`` catches the former;
+    mypy catches the attributes it can resolve statically; a dynamically typed attribute can still
+    fail at runtime with nothing reporting it. What this function does guarantee is that no
+    fallible *work* is hidden in an accepted shape: arithmetic, comparisons, subscripting,
+    calls to non-reporting code, comprehensions, unpacking and the rest are rejected by node type.
 
     WP0.4e: the handler body is a *whitelist of statement and expression shapes*, not an attempt to
     prove that arbitrary code cannot raise. `x = 1 / 0` and `x = d["k"]` raise, so neither the
@@ -180,8 +183,9 @@ def _expr_is_safe(node: ast.expr | None) -> bool:
             _expr_is_safe(keyword.value) for keyword in node.keywords
         )
     if isinstance(node, ast.Dict):
-        # ``key is None`` is a ``{**other}`` expansion; ``other`` must still be a safe expression
-        return all(key is None or _expr_is_safe(key) for key in node.keys) and all(
+        # dict unpacking (``{**other}``, key is None) is rejected: it can raise TypeError and the
+        # module docstring lists starred unpacking as out of bounds. Only literal keys/values pass.
+        return all(key is not None and _expr_is_safe(key) for key in node.keys) and all(
             _expr_is_safe(value) for value in node.values
         )
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
@@ -206,9 +210,18 @@ def _stmt_is_safe(stmt: ast.stmt) -> bool:
         # bare ``return`` / ``return None`` only: a returned value would change the caller's result
         return stmt.value is None or (isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
     if isinstance(stmt, ast.Assign):
-        return all(_expr_is_safe(target) for target in stmt.targets) and _expr_is_safe(stmt.value)
+        # targets must be a plain name or attribute: tuple/list targets unpack an iterable and can
+        # raise ValueError, which would hide work behind a "fallback"
+        return all(isinstance(t, (ast.Name, ast.Attribute)) and _expr_is_safe(t) for t in stmt.targets) and (
+            _expr_is_safe(stmt.value)
+        )
     if isinstance(stmt, ast.AnnAssign):
-        return _expr_is_safe(stmt.target) and _expr_is_safe(stmt.annotation) and _expr_is_safe(stmt.value)
+        return (
+            isinstance(stmt.target, (ast.Name, ast.Attribute))
+            and _expr_is_safe(stmt.target)
+            and _expr_is_safe(stmt.annotation)
+            and _expr_is_safe(stmt.value)
+        )
     # AugAssign is deliberately rejected: `x += 1` implies an arithmetic/`__iadd__` operation that
     # can raise, and a fallback that can raise is a mandatory import in disguise (WP0.4e).
     return False
@@ -574,6 +587,10 @@ def test_scanner_rejects_fallible_expressions_in_a_handler():
         "augassign": "try:\n    import mlflow\nexcept ImportError:\n    x += 1\n",
         # a bare expression statement is not a reporting call and can raise NameError/AttributeError
         "bare_name_statement": "try:\n    import mlflow\nexcept ImportError:\n    NEVER_DEFINED\n",
+        # dict unpacking can raise TypeError during fallback; starred unpacking is out of bounds
+        "dict_unpack": "try:\n    import mlflow\nexcept ImportError:\n    x = {**y}\n",
+        # unpacking assignment can raise ValueError (wrong length) and is not a reporting shape
+        "unpacking_assign": "try:\n    import mlflow\nexcept ImportError:\n    a, b = 1, 2\n",
     }
     for label, source in probes.items():
         found = scan_source(source)
