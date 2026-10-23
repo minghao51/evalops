@@ -1,0 +1,55 @@
+{
+  "summary": "pr eval of e2e-a9c21709-5b67a49e on golden_regression: 1 run(s), $0.0078 actual vs $0.0159 est",
+  "group": "cdc3fc759d57",
+  "app_version": "e2e-a9c21709-5b67a49e",
+  "stage": "pr",
+  "dataset": "golden_regression",
+  "env": "local",
+  "kind": "eval",
+  "tool_mode": "live",
+  "plugins": {
+    "prompts": "git",
+    "datasets": "git",
+    "ledger": "sql",
+    "tracer": "none",
+    "evaluator": "core"
+  },
+  "run_ids": [
+    "3f05363953594c80a61c8296d6cfa6da"
+  ],
+  "runs": [
+    {
+      "run_id": "3f05363953594c80a61c8296d6cfa6da",
+      "metrics": {
+        "facts/mean": 1.0,
+        "helpful/mean": 1.0,
+        "error_rate": 0.0,
+        "budget_exceeded_rate": 0.0,
+        "gen_input_tokens": 640,
+        "gen_output_tokens": 150,
+        "gen_input_tokens_per_row": 213.33333333333334,
+        "gen_output_tokens_per_row": 50.0,
+        "gen_cost_usd": 0.00124,
+        "judge_cost_usd_est": 0.0066,
+        "total_cost_usd": 0.00784,
+        "cost_per_row_usd": 0.0026133333333333334,
+        "rows_missing_usage": 0,
+        "tool_replay_misses": 0
+      },
+      "errors": 0,
+      "native_ref": null
+    }
+  ],
+  "cost": {
+    "estimate_usd": 0.0159,
+    "actual_usd": 0.0078,
+    "budget": {
+      "estimate_usd": 0.0159,
+      "per_run_usd": 5,
+      "month_spent_usd": 0,
+      "per_month_usd": 50,
+      "override": false,
+      "problems": []
+    }
+  }
+}

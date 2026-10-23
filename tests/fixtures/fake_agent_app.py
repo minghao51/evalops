@@ -6,13 +6,22 @@ Prompt flags (in prompts/router.txt) inject realistic agent bugs:
   ROUTE_FLAKY  -> every other run routes refund questions to the wrong sub-agent (non-determinism)
   LOOP         -> the agent keeps calling the same tool (runaway loop -> circuit breaker)
 """
+
 import itertools
 import os
 import uuid
 
 import evalops
-from evalops.scorers import (agent_route, expected_state, forbidden_tools, no_loops, step_budget, tool_args,
-                             tool_precision, tool_trajectory)
+from evalops.scorers import (
+    agent_route,
+    expected_state,
+    forbidden_tools,
+    no_loops,
+    step_budget,
+    tool_args,
+    tool_precision,
+    tool_trajectory,
+)
 from evalops.traces import langchain_callbacks
 
 _flaky = itertools.count()
@@ -69,8 +78,14 @@ class FakeGraph:
 
     def _llm(self, parent, text, model="fake-gpt"):
         rid = uuid.uuid4()
-        self._emit("on_chat_model_start", {"name": "ChatFake"}, [[text]], run_id=rid, parent_run_id=parent,
-                   invocation_params={"model": model})
+        self._emit(
+            "on_chat_model_start",
+            {"name": "ChatFake"},
+            [[text]],
+            run_id=rid,
+            parent_run_id=parent,
+            invocation_params={"model": model},
+        )
         self._emit("on_llm_end", _Result("ok", 120, 30), run_id=rid)
 
     def _tool(self, parent, name, fn, **args):
@@ -86,8 +101,15 @@ class FakeGraph:
 
     def _node(self, parent, node):
         rid = uuid.uuid4()
-        self._emit("on_chain_start", {"name": node}, {}, run_id=rid, parent_run_id=parent,
-                   metadata={"langgraph_node": node}, name=node)
+        self._emit(
+            "on_chain_start",
+            {"name": node},
+            {},
+            run_id=rid,
+            parent_run_id=parent,
+            metadata={"langgraph_node": node},
+            name=node,
+        )
         return rid
 
     def _end(self, rid, out=None):
@@ -131,8 +153,9 @@ def build_predict_fn(prompts):
     router = prompts["router"]
 
     def predict(question: str) -> dict:
-        graph = FakeGraph(router.template, langchain_callbacks())   # <- the one line LangGraph users add
+        graph = FakeGraph(router.template, langchain_callbacks())  # <- the one line LangGraph users add
         return graph.invoke(question)
+
     return predict
 
 
@@ -146,8 +169,17 @@ def helpful(*, outputs):
 
 
 def build_scorers(evaluator="core"):
-    return [helpful, tool_trajectory("in_order"), tool_precision(), tool_args(), forbidden_tools(),
-            step_budget(), no_loops(max_identical=3), agent_route("exact"), expected_state()]
+    return [
+        helpful,
+        tool_trajectory("in_order"),
+        tool_precision(),
+        tool_args(),
+        forbidden_tools(),
+        step_budget(),
+        no_loops(max_identical=3),
+        agent_route("exact"),
+        expected_state(),
+    ]
 
 
 def judge_meta():

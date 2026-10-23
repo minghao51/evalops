@@ -1,0 +1,8 @@
+{
+  "support_system": {
+    "physical": "support_system",
+    "plugin": "git",
+    "sha256": "0e3c1101a76c7ba93cd04b7ae60d0147565cd3f6aaf49c05bf7dc4cb45e14a51",
+    "version": "1"
+  }
+}

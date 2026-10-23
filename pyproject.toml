@@ -20,7 +20,7 @@ otel = ["opentelemetry-sdk>=1.27"]    # trace capture for OTel-instrumented fram
 langgraph = ["langchain-core>=0.3"]   # native LangChain/LangGraph callback capture
 # OpenInference instrumentors are installed per framework, e.g.
 #   pip install openinference-instrumentation-crewai openinference-instrumentation-llama-index
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-xdist>=3", "hypothesis>=6", "ruff>=0.9", "mypy>=1.10"]
 
 [project.scripts]
 evalops = "evalops.cli:main"
@@ -31,3 +31,86 @@ evalops = "evalops.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# ---------------------------------------------------------------------------
+# Tests: pytest config lives here so every entry point (CI, make, agents) agrees.
+# `contract` tests need docker/credentials and are excluded from the offline suite.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = '-m "not contract"'
+markers = [
+    "contract: needs a live backend (docker-local or credentials); excluded from the offline suite",
+    "slow: takes more than ~10s; run explicitly when iterating on the slow path",
+]
+
+# ---------------------------------------------------------------------------
+# Lint: py310, 120 cols. The per-file ignores are pre-existing debt in files this
+# WP may not edit (src/**); remove an entry as soon as its file is touched.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/evalops/__init__.py" = ["I001"]
+"src/evalops/cli.py" = ["I001"]
+"src/evalops/prompts.py" = ["B007"]
+"src/evalops/ports.py" = ["B027", "UP035"]
+"src/evalops/scoring.py" = ["UP035"]
+"src/evalops/tools.py" = ["UP037"]
+"src/evalops/plugins/langfuse.py" = ["E501"]
+"src/evalops/plugins/langsmith.py" = ["E501", "SIM117"]
+"src/evalops/plugins/mlflow.py" = ["I001"]
+"src/evalops/plugins/sql.py" = ["E501", "I001"]
+"src/evalops/scorers/__init__.py" = ["I001"]
+"src/evalops/traces/capture.py" = ["SIM105", "UP037"]
+"src/evalops/traces/instrument.py" = ["E501"]
+# pre-existing debt outside this WP's editable paths (examples/, src/); drop when touched.
+"examples/langgraph_hooks.py" = ["I001"]
+
+# ---------------------------------------------------------------------------
+# Types: non-strict on the legacy modules, strict for `evalops.config` and the new
+# contract/stats surfaces. `evalops.contract` lands in WP0.4, `evalops.stats` in WP1.3;
+# unmatched per-flag overrides are inert until then. `evalops.config` became strict in WP0.4b
+# (the former `disable_error_code = ["assignment"]` escape hatch is gone).
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+files = ["src/evalops"]
+ignore_missing_imports = true
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = ["evalops.scoring"]
+disable_error_code = ["attr-defined"]   # decorator attributes are attached dynamically
+
+# Equivalent to `strict = true`, spelled out because mypy 2.x promotes an unmatched
+# `strict = true` override to the default section, which would strict-check all of src/.
+# `warn_unused_configs` and `warn_redundant_casts` are global-only flags in mypy 2.x and are
+# therefore omitted here. The modules may not exist yet; unmatched per-flag overrides are inert.
+[[tool.mypy.overrides]]
+module = [
+    "evalops.config",
+    "evalops.config.*",
+    "evalops.contract",
+    "evalops.contract.*",
+    "evalops.stats",
+    "evalops.stats.*",
+]
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true

@@ -10,7 +10,12 @@ Modes (set per stage in evalops.yaml `tools.mode_by_stage`, or `evalops eval --t
   replay  return the recorded response; a miss is an error (or `live` with tools.on_miss: live)
 Outside an evalops row the decorator is a no-op passthrough, so production is unaffected.
 Cassettes live in git; their fingerprint is logged and part of the app version hash.
+A cassette file is versioned: the writer emits a `_meta` line first ({schema_version,
+  evalops_version, created_at}), the reader skips it, and a file without `_meta` is v0 and still
+loads. The fingerprint covers only the semantic entry fields (key, tool, args, response, error), so
+adding `_meta` or re-recording metadata never changes it.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -18,12 +23,17 @@ import contextvars
 import functools
 import inspect
 import json
+import pathlib
 import threading
 
-from .util import canonical, sha256
+from .contract import formats
+from .util import EXIT_RUNTIME, EvalOpsError, FormatError, canonical, sha256
 
 _ctx: contextvars.ContextVar = contextvars.ContextVar("evalops_tools", default=None)
-_active: "Cassette | None" = None   # process-wide fallback: worker threads don't inherit contextvars
+_active: "Cassette | None" = None  # process-wide fallback: worker threads don't inherit contextvars
+
+# Identity fields of a cassette entry: what the fingerprint hashes. Metadata is never included.
+ENTRY_FIELDS = ("key", "tool", "args", "response", "error")
 
 
 class ToolReplayMiss(RuntimeError):
@@ -31,27 +41,53 @@ class ToolReplayMiss(RuntimeError):
 
 
 class Cassette:
-    def __init__(self, path, mode: str, on_miss: str = "error"):
+    def __init__(self, path: pathlib.Path | None, mode: str, on_miss: str = "error"):
         self.path, self.mode, self.on_miss = path, mode, on_miss
         self.entries: dict[str, dict] = {}
         self.lock = threading.Lock()
         self.dirty = False
         if path is not None and path.exists():
-            for line in path.read_text().splitlines():
-                if line.strip():
-                    e = json.loads(line)
-                    self.entries[e["key"]] = e
+            self._load(path)
         self.misses: list[str] = []
 
+    def _load(self, path: pathlib.Path) -> None:
+        """v0 files (no `_meta` line) and v1 files (a leading `_meta` line) both load.
+
+        A line that is not a JSON object is a contract mismatch (exit 7), never a TypeError from
+        indexing a string/list.
+        """
+        if self.path is None:  # pragma: no cover - defensive
+            return
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise EvalOpsError(f"{path}:{i}: not valid JSON: {exc}", EXIT_RUNTIME) from exc
+            if not isinstance(e, dict):
+                raise FormatError(f"{path}:{i}", "not-an-object", formats.FORMAT_VERSION)
+            if formats.META_KEY in e and "key" not in e:
+                formats.check_version(e[formats.META_KEY] or e, path)
+                continue
+            self.entries[e["key"]] = e
+
     def fingerprint(self) -> str:
-        return sha256("\n".join(sorted(canonical(e) for e in self.entries.values())))[:12] if self.entries else "none"
+        """sha256 over the semantic entry fields only: metadata cannot change an app version."""
+        if not self.entries:
+            return "none"
+        rows = sorted(canonical(formats.semantic(e, ENTRY_FIELDS)) for e in self.entries.values())
+        return sha256("\n".join(rows))[:12]
 
     def save(self) -> None:
         if not self.dirty or self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text("".join(json.dumps(e, sort_keys=True, default=str) + "\n"
-                                     for _, e in sorted(self.entries.items())))
+        meta_line = json.dumps({formats.META_KEY: formats.meta()}, sort_keys=True, default=str) + "\n"
+        self.path.write_text(
+            meta_line
+            + "".join(json.dumps(e, sort_keys=True, default=str) + "\n" for _, e in sorted(self.entries.items()))
+        )
         self.dirty = False
 
 
@@ -99,8 +135,10 @@ def replayable(name: str | None = None):
                     return key, hit, cas
                 cas.misses.append(f"{tool}({canonical(args)[:200]})")
                 if cas.on_miss != "live":
-                    raise ToolReplayMiss(f"no recording for {tool}({canonical(args)[:200]}); "
-                                         f"re-record with `evalops eval --tool-mode record`")
+                    raise ToolReplayMiss(
+                        f"no recording for {tool}({canonical(args)[:200]}); "
+                        f"re-record with `evalops eval --tool-mode record`"
+                    )
             return key, None, cas
 
         def replay(hit):
@@ -111,13 +149,13 @@ def replayable(name: str | None = None):
         def record(cas, key, args, response=None, error=None):
             if cas is not None and cas.mode == "record":
                 with cas.lock:
-                    cas.entries[key] = {"key": key, "tool": tool, "args": args, "response": response,
-                                        "error": error}
+                    cas.entries[key] = {"key": key, "tool": tool, "args": args, "response": response, "error": error}
                     cas.dirty = True
 
         if inspect.iscoroutinefunction(fn):
+
             @functools.wraps(fn)
-            async def wrapper(*a, **kw):
+            async def async_wrapper(*a, **kw):
                 args = bound(*a, **kw)
                 key, hit, cas = before(args)
                 if hit is not None:
@@ -129,9 +167,12 @@ def replayable(name: str | None = None):
                     raise
                 record(cas, key, args, response=out)
                 return out
+
+            wrapper = async_wrapper
         else:
+
             @functools.wraps(fn)
-            def wrapper(*a, **kw):
+            def sync_wrapper(*a, **kw):
                 args = bound(*a, **kw)
                 key, hit, cas = before(args)
                 if hit is not None:
@@ -143,6 +184,9 @@ def replayable(name: str | None = None):
                     raise
                 record(cas, key, args, response=out)
                 return out
-        wrapper.evalops_tool = tool
+
+            wrapper = sync_wrapper
+        setattr(wrapper, "evalops_tool", tool)  # noqa: B010 - marker read by frameworks/diagnostics
         return wrapper
+
     return deco

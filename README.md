@@ -75,10 +75,13 @@ Every CI system calls `bash ci/pipeline.sh pr|main|release|nightly`. Adapters fo
 - **nightly:** check out the baseline's git SHA → control eval → `gate --label drift`. This detects platform, model, or judge drift that no PR caused.
 
 ## Tests
-- Run `python tests/run_without_pytest.py` (or `pytest`). There are 17 tests.
-- `tests/test_traces.py` pins the span mapping for each framework dialect.
-- `tests/test_e2e_agent.py` runs a LangGraph-style multi-agent app through the full agent lifecycle: record/replay, the reliability gate catching a flaky router, the circuit breaker stopping a runaway loop, judge-only re-scoring of stored traces, and judge calibration.
-- The end-to-end test covers the whole lifecycle on the zero-dependency plugins: sync, guard, async and flaky predict with retries, gate, promotion, regression detection, judge-only re-scoring, budgets, frozen datasets, capability errors, and a third-party plugin.
+- `make check` is the gate: ruff + mypy + pytest. It runs offline, with no docker, network, or vendor SDK. `make test` runs just the suite; `make lint`, `make typecheck`, and `make test-unit` are the parts.
+- `python tests/run_without_pytest.py` is the dependency-free fallback runner (same tests, no pytest). Both must stay green.
+- `tests/unit/test_traces.py` pins the span mapping for each framework dialect.
+- `tests/integration/test_e2e_agent.py` runs a LangGraph-style multi-agent app through the full agent lifecycle: record/replay, the reliability gate catching a flaky router, the circuit breaker stopping a runaway loop, judge-only re-scoring of stored traces, and judge calibration.
+- `tests/integration/test_e2e_local.py` covers the whole lifecycle on the zero-dependency plugins: sync, guard, async and flaky predict with retries, gate, promotion, regression detection, judge-only re-scoring, budgets, frozen datasets, capability errors, and a third-party plugin.
+- `tests/unit/test_no_vendor_imports.py` AST-scans core and fails if a vendor SDK is imported outside `plugins/` and `traces/`.
+- `make contract` runs the docker-local vendor contract suite; it is skipped when docker or `tests/contract/` is absent, and is excluded from `make check`.
 
 ## Known limits
 - The vendor plugins (`mlflow`, `langfuse`, `langsmith`, `logfire`) follow current docs but were not run against live services when written. Lines marked `VERIFY` are the API details to check on SDK upgrades.

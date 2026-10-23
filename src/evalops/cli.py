@@ -3,6 +3,7 @@
 Every command supports --json and uses stable exit codes:
   0 ok | 1 gate failed | 2 usage/config | 3 budget exceeded | 4 guard violation | 5 runtime | 6 unsupported by plugin
 """
+
 import argparse
 import sys
 
@@ -11,8 +12,9 @@ from .util import EXIT_GATE_FAILED, EXIT_OK, EXIT_RUNTIME, EvalOpsError, emit
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="evalops", description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        prog="evalops", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--config", help="path to evalops.yaml (default: search upward from cwd)")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -36,8 +38,11 @@ def build_parser():
             e.add_argument("--allow-dirty", action="store_true", help="dev only; run is unpromotable")
             e.add_argument("--override-budget", action="store_true", help="humans only; tagged on the run")
             e.add_argument("--dry-run", action="store_true")
-            e.add_argument("--tool-mode", choices=["live", "record", "replay"],
-                           help="override tools.mode_by_stage (record = refresh cassettes)")
+            e.add_argument(
+                "--tool-mode",
+                choices=["live", "record", "replay"],
+                help="override tools.mode_by_stage (record = refresh cassettes)",
+            )
 
     c = sub.add_parser("calibrate", help="check LLM judges against human labels (no generation)")
     c.add_argument("--dataset", required=True)
@@ -90,8 +95,7 @@ def dispatch(args, cfg) -> dict:
                 report[role] = reg.get(role).doctor()
             except Exception as e:  # noqa: BLE001
                 ok, report[role] = False, {"plugin": cfg.plugins[role], "ok": False, "error": str(e)}
-        return {"ok": ok, "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'",
-                "roles": report}
+        return {"ok": ok, "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'", "roles": report}
     if args.cmd == "guard":
         return guard.run_guard(cfg)
     if args.cmd == "sync":
@@ -104,20 +108,33 @@ def dispatch(args, cfg) -> dict:
     if args.cmd == "plan":
         return run.plan(cfg, args.dataset, args.stage, args.repeats, args.judge_only)
     if args.cmd == "eval":
-        out = run.evaluate(cfg, args.dataset, args.stage, args.repeats, args.judge_only, args.source_group,
-                           args.allow_dirty, args.override_budget, args.dry_run, args.tool_mode)
+        out = run.evaluate(
+            cfg,
+            args.dataset,
+            args.stage,
+            args.repeats,
+            args.judge_only,
+            args.source_group,
+            args.allow_dirty,
+            args.override_budget,
+            args.dry_run,
+            args.tool_mode,
+        )
         out.pop("_rows", None)
         return out
     if args.cmd == "calibrate":
         from . import calibrate
+
         return calibrate.calibrate(cfg, args.dataset, args.scorer, args.allow_dirty)
     if args.cmd == "traces":
-        import json as _json
         from . import locks
+        from .contract import formats
+
         group = args.group
         if not group:
             last = locks.scratch(cfg, "last_eval.json")
-            group = _json.loads(last.read_text())["group"] if last.exists() else None
+            # Versioned read: a future schema_version is exit 7, not a raw json.loads crash or misread.
+            group = formats.read_versioned(last)["group"] if last.exists() else None
         if not group:
             raise EvalOpsError("no --group and no last_eval.json")
         return run.show_traces(cfg, group, args.row)

@@ -11,6 +11,7 @@ EXIT_BUDGET = 3
 EXIT_GUARD = 4
 EXIT_RUNTIME = 5
 EXIT_CAPABILITY = 6  # the configured plugin does not support the requested operation
+EXIT_CONTRACT = 7  # a persisted artifact declares a format this evalops does not understand
 
 
 class EvalOpsError(Exception):
@@ -23,6 +24,18 @@ class EvalOpsError(Exception):
 class CapabilityError(EvalOpsError):
     def __init__(self, plugin: str, operation: str, hint: str = ""):
         super().__init__(f"plugin '{plugin}' does not support {operation}. {hint}".strip(), EXIT_CAPABILITY)
+
+
+class FormatError(EvalOpsError):
+    """A persisted artifact is newer than this evalops: name the file, the found and the supported version."""
+
+    def __init__(self, source: str, found, supported: int):
+        super().__init__(
+            f"{source}: unsupported schema_version {found!r}; this evalops supports up to "
+            f"schema_version {supported} (upgrade evalops or regenerate the file)",
+            EXIT_CONTRACT,
+        )
+        self.source, self.found, self.supported = source, found, supported
 
 
 def sha256(text: str) -> str:
@@ -38,6 +51,7 @@ _VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 def render(template, variables: dict):
     """Render {{var}} placeholders in a text template or a list of chat messages."""
+
     def sub(text: str) -> str:
         return _VAR.sub(lambda m: str(variables.get(m.group(1), m.group(0))), text)
 

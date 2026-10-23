@@ -4,6 +4,7 @@ Covers: trace capture, trajectory + route + args scorers, tool record/replay (of
 reliability gating (pass^k) catching a flaky router, the circuit breaker catching a runaway loop,
 trace-derived per-model cost, judge-only re-scoring of stored traces, and judge calibration.
 """
+
 import json
 import os
 import pathlib
@@ -12,16 +13,26 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REFUND = {"expected_tools": ["lookup_order", {"name": "issue_refund", "args": {"order_id": "A1", "amount": 89.9}}],
-          "forbidden_tools": ["delete_account"], "max_steps": 6, "expected_agents": ["supervisor", "refund_agent"],
-          "expected_state": {"status": "refunded"}}
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+REFUND = {
+    "expected_tools": ["lookup_order", {"name": "issue_refund", "args": {"order_id": "A1", "amount": 89.9}}],
+    "forbidden_tools": ["delete_account"],
+    "max_steps": 6,
+    "expected_agents": ["supervisor", "refund_agent"],
+    "expected_state": {"status": "refunded"},
+}
 GOLDEN = [
     {"inputs": {"question": "I want a refund for order A1"}, "expectations": REFUND},
     {"inputs": {"question": "Please refund my last order"}, "expectations": REFUND},
-    {"inputs": {"question": "What are your hours?"},
-     "expectations": {"expected_tools": ["policy_search"], "expected_agents": ["supervisor", "info_agent"],
-                      "expected_state": {"status": "answered"}, "max_steps": 4}},
+    {
+        "inputs": {"question": "What are your hours?"},
+        "expectations": {
+            "expected_tools": ["policy_search"],
+            "expected_agents": ["supervisor", "info_agent"],
+            "expected_state": {"status": "answered"},
+            "max_steps": 4,
+        },
+    },
 ]
 CALIBRATION = [
     {"inputs": {"question": "q1"}, "outputs": {"status": "refunded"}, "expectations": {"human_labels": {"helpful": 1}}},
@@ -84,8 +95,8 @@ def cli(d, *args, env=None):
     p = subprocess.run([sys.executable, "-m", "evalops", "--json", *args], cwd=d, env=e, capture_output=True, text=True)
     try:
         return p.returncode, json.loads(p.stdout)
-    except json.JSONDecodeError:
-        raise AssertionError(f"non-JSON output (exit {p.returncode}): {p.stdout}\n{p.stderr}")
+    except json.JSONDecodeError as e:
+        raise AssertionError(f"non-JSON output (exit {p.returncode}): {p.stdout}\n{p.stderr}") from e
 
 
 def set_prompt(d, text):
@@ -165,8 +176,9 @@ def test_agent_lifecycle():
     assert cli(d, "gate")[0] == 1
 
     # 6) Judge-only: re-score the baseline's STORED traces (no generation, trajectory scorers still work)
-    code, out = cli(d, "eval", "--dataset", "agent_golden", "--stage", "dev", "--judge-only",
-                    "--source-group", main_group)
+    code, out = cli(
+        d, "eval", "--dataset", "agent_golden", "--stage", "dev", "--judge-only", "--source-group", main_group
+    )
     assert code == 0, out
     m = out["runs"][0]["metrics"]
     assert m["gen_cost_usd"] == 0 and m["tool_trajectory/mean"] == 1.0 and m["agent_route/mean"] == 1.0, m

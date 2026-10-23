@@ -4,4 +4,16 @@
 !.evalops/store/
 *.egg-info/
 __pycache__/
+*.py[cod]
 .venv/
+
+# dev tooling caches (never commit; never used as evidence)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.whl

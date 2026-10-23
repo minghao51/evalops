@@ -1,0 +1,3 @@
+{"args": {"order_id": "A-1001"}, "error": null, "key": "1f0d8f6f8d4b3a7c9e2b5a41", "response": {"status": "shipped", "eta_days": 2}, "tool": "lookup_order"}
+{"args": {"order_id": "A-1002"}, "error": null, "key": "7c2b9e4a1d6f8c3b0a5e9d72", "response": {"status": "processing", "eta_days": 5}, "tool": "lookup_order"}
+{"args": {"question": "How do I reset my password?"}, "error": "TimeoutError: upstream timeout after 30s", "key": "b4e6d2c0a8f13579ce0b7d64", "tool": "search_kb"}

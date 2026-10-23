@@ -1,0 +1,16 @@
+{
+  "golden_regression": {
+    "fingerprint": "9c8794cd0af4ff75392124c0f6cbb41a31cc598895586f8a695403e47b0cdec0",
+    "git_sha": "2982289f",
+    "physical": "golden_regression__9c8794cd",
+    "plugin": "git",
+    "rows": 3
+  },
+  "smoke": {
+    "fingerprint": "ba92db992c498e886e7ca2cc64018d3771cd46fc411d059a589d490718684ea8",
+    "git_sha": "2982289f",
+    "physical": "smoke__ba92db99",
+    "plugin": "git",
+    "rows": 1
+  }
+}

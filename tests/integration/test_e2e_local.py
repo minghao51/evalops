@@ -4,6 +4,7 @@ Exercises: sync, guard, plan, eval (async + flaky predict with retries), gate, p
 regression detection, judge-only re-scoring, budgets, frozen datasets, capability errors, and a
 third-party plugin loaded via "module:Class".
 """
+
 import json
 import os
 import pathlib
@@ -12,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 CONFIG = """
 project: e2e
@@ -43,7 +44,7 @@ cost:
 guard: {exclude: [".git", "src"]}
 """
 
-CUSTOM_TRACER = '''
+CUSTOM_TRACER = """
 from evalops.ports import Plugin, Tracer
 class CountingTracer(Plugin, Tracer):
     name = "counting"
@@ -52,7 +53,7 @@ class CountingTracer(Plugin, Tracer):
         def traced(**inputs):
             return fn(**inputs), f"count-{row_id}"
         return traced
-'''
+"""
 
 
 def sh(cmd, cwd):
@@ -85,8 +86,8 @@ def cli(d, *args, env=None):
     p = subprocess.run([sys.executable, "-m", "evalops", "--json", *args], cwd=d, env=e, capture_output=True, text=True)
     try:
         out = json.loads(p.stdout)
-    except json.JSONDecodeError:
-        raise AssertionError(f"non-JSON output (exit {p.returncode}): {p.stdout}\n{p.stderr}")
+    except json.JSONDecodeError as e:
+        raise AssertionError(f"non-JSON output (exit {p.returncode}): {p.stdout}\n{p.stderr}") from e
     return p.returncode, out
 
 
@@ -96,7 +97,7 @@ def test_full_lifecycle():
     code, out = cli(d, "plugins")
     assert code == 0 and all(r["ok"] for r in out["roles"].values()), out
 
-    assert cli(d, "guard")[0] == 0                       # static checks pass before first sync
+    assert cli(d, "guard")[0] == 0  # static checks pass before first sync
     code, out = cli(d, "sync", "all", "--check")
     assert code == 4 and "no prompts lock" in out["error"], out
 
@@ -126,8 +127,8 @@ def test_full_lifecycle():
     assert code == 0 and out["moves"][0]["to"] == "1", out
     aliases = json.loads((d / ".evalops/store/prompts/support_system/aliases.json").read_text())
     assert aliases == {"production": "1"}
-    assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4   # git-plugin alias move = uncommitted
-    commit(d, "promote")                                                  # (ci/pipeline.sh commits it)
+    assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4  # git-plugin alias move = uncommitted
+    commit(d, "promote")  # (ci/pipeline.sh commits it)
     code, out = cli(d, "baseline")
     assert out["baseline"]["group"] == main_group
 
@@ -141,7 +142,7 @@ def test_full_lifecycle():
     p = d / "prompts" / "support_system.txt"
     p.write_text(p.read_text() + "\nBE_UNHELPFUL\n")
     commit(d, "worse prompt")
-    assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4      # out of sync -> guard
+    assert cli(d, "eval", "--dataset", "smoke", "--stage", "pr")[0] == 4  # out of sync -> guard
     assert cli(d, "sync", "prompts")[0] == 0
     commit(d, "sync worse")
     code, out = cli(d, "eval", "--dataset", "golden_regression", "--stage", "pr")
@@ -151,8 +152,9 @@ def test_full_lifecycle():
     assert "FAILED" in (d / ".evalops/out/gate_report.md").read_text()
 
     # Judge-only re-score of the baseline outputs: no generation cost
-    code, out = cli(d, "eval", "--dataset", "golden_regression", "--stage", "dev", "--judge-only",
-                    "--source-group", main_group)
+    code, out = cli(
+        d, "eval", "--dataset", "golden_regression", "--stage", "dev", "--judge-only", "--source-group", main_group
+    )
     assert code == 0, out
     m = out["runs"][0]["metrics"]
     assert m["gen_cost_usd"] == 0 and m["facts/mean"] == 1.0, m

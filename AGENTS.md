@@ -39,6 +39,13 @@ The `evalops` CLI is the **only** interface for prompts, datasets, evaluations, 
 - Never raise `row_limits` or the framework's own hard stops (`recursion_limit`, `max_turns`, ...) to make a looping agent pass.
 - Never weaken `gates`, `budgets`, `guard`, or `plugins` in `evalops.yaml` to make a check pass.
 
+## Tests (dev loop)
+- `make check` runs lint + typecheck + tests. Run it before reporting a change; it is offline (no docker, no network, no vendor SDK).
+- `make test` runs pytest over `tests/unit` and `tests/integration`; `make test-unit` / `make test-integration` narrow it.
+- `python tests/run_without_pytest.py` is the dependency-free fallback runner; both it and pytest must stay green.
+- Put pure tests in `tests/unit` (offline, <10 s) and lifecycle tests in `tests/integration` (temp-dir repos). Mark docker/credential tests `@pytest.mark.contract`; they are excluded by default.
+- Never weaken, skip, or delete a test to go green. Core (anything outside `plugins/` and `traces/`) must not import a vendor SDK; `tests/unit/test_no_vendor_imports.py` enforces it.
+
 ## Typical loop
 ```bash
 export EVALOPS_ACTOR=agent:claude EVALOPS_ENV=local
