@@ -1,0 +1,35 @@
+# Copy to .gitlab-ci.yml. Set EVALOPS_ENV + backend credentials as CI/CD variables.
+image: python:3.11
+variables: { EVALOPS_ENV: "local", PIP_EXTRAS: "" }
+before_script:
+  - pip install -e ".[${PIP_EXTRAS}]" -r requirements.txt
+
+evalops:pr:
+  rules: [{ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' }]
+  variables:
+    EVALOPS_PR: "$CI_MERGE_REQUEST_IID"
+    EVALOPS_BRANCH: "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+  script:
+    - export EVALOPS_ALLOW_FROZEN_CHANGE=$([[ "$CI_MERGE_REQUEST_LABELS" == *approve-dataset-change* ]] && echo true || echo false)
+    - git remote set-url origin "https://oauth2:${EVALOPS_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - git checkout -B "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+    - bash ci/pipeline.sh pr
+  artifacts: { when: always, paths: [.evalops/out/] }
+
+evalops:main:
+  rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"' }]
+  resource_group: evalops-main
+  variables: { EVALOPS_BRANCH: "$CI_DEFAULT_BRANCH" }
+  script: [bash ci/pipeline.sh main]
+  artifacts: { when: always, paths: [.evalops/out/] }
+
+evalops:release:
+  rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH', when: manual }]
+  environment: { name: production }        # protect for approvals; set EVIDENCE_GROUP when triggering
+  variables: { EVALOPS_BRANCH: "$CI_DEFAULT_BRANCH" }
+  script: [bash ci/pipeline.sh release]
+
+evalops:nightly:
+  rules: [{ if: '$CI_PIPELINE_SOURCE == "schedule"' }]
+  script: [bash ci/pipeline.sh nightly]
+  artifacts: { when: always, paths: [.evalops/out/] }

@@ -1,0 +1,87 @@
+# Copy to .github/workflows/evalops.yml. Backend = repo variable EVALOPS_ENV (mlflow, databricks,
+# langfuse, langsmith, logfire, local...). Only the secrets your backend needs must be set.
+name: evalops
+on:
+  pull_request:
+  push: { branches: [main] }
+  schedule: [{ cron: "0 3 * * *" }]
+  workflow_dispatch:
+    inputs:
+      evidence_group: { description: "main-stage group id to promote", required: true }
+
+permissions: { contents: write, pull-requests: write, id-token: write }
+
+env:
+  EVALOPS_ENV: ${{ vars.EVALOPS_ENV || 'local' }}
+  EVALOPS_LEDGER_URL: ${{ secrets.EVALOPS_LEDGER_URL }}        # sql ledger (e.g. Postgres) when used
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_SP_TOKEN }}
+  LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+  LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+  LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+  LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+  LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+  LOGFIRE_READ_TOKEN: ${{ secrets.LOGFIRE_READ_TOKEN }}
+  PIP_EXTRAS: ${{ vars.EVALOPS_EXTRAS || '' }}                  # e.g. "mlflow" or "langfuse,sql"
+
+jobs:
+  pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency: { group: "evalops-pr-${{ github.event.pull_request.number }}", cancel-in-progress: true }
+    env:
+      EVALOPS_PR: ${{ github.event.pull_request.number }}
+      EVALOPS_BRANCH: ${{ github.head_ref }}
+      EVALOPS_ALLOW_FROZEN_CHANGE: ${{ contains(github.event.pull_request.labels.*.name, 'approve-dataset-change') }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.head_ref }}", fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[${PIP_EXTRAS}]" -r requirements.txt
+      - run: bash ci/pipeline.sh pr
+      - if: always() && hashFiles('.evalops/out/gate_report.md') != ''
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file .evalops/out/gate_report.md
+        env: { GH_TOKEN: "${{ github.token }}" }
+
+  main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency: { group: evalops-main }
+    env: { EVALOPS_BRANCH: main }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[${PIP_EXTRAS}]" -r requirements.txt
+      - run: bash ci/pipeline.sh main
+      - if: always()
+        run: cat .evalops/out/gate_report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production                       # configure required reviewers here
+    env: { EVALOPS_BRANCH: main }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[${PIP_EXTRAS}]" -r requirements.txt
+      - run: bash ci/pipeline.sh release
+        env: { EVIDENCE_GROUP: "${{ inputs.evidence_group }}" }
+
+  nightly:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[${PIP_EXTRAS}]" -r requirements.txt
+      - run: bash ci/pipeline.sh nightly
+      - if: always()
+        run: cat .evalops/out/drift_report.md >> "$GITHUB_STEP_SUMMARY" || true

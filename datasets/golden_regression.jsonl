@@ -1,0 +1,3 @@
+{"inputs": {"question": "How do I reset my password?"}, "expectations": {"expected_facts": ["Forgot password", "email"]}}
+{"inputs": {"question": "Can I get a refund after 30 days?"}, "expectations": {"expected_facts": ["30 days"]}}
+{"inputs": {"question": "What are your business hours?"}, "expectations": {"expected_facts": ["9am", "Monday"]}}

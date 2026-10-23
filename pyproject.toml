@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evalops"
+version = "0.3.0"
+description = "Backend-agnostic versioning, evaluation, gating and cost control for LLM apps (plugins for MLflow, Langfuse, LangSmith, Logfire, git, SQL)"
+requires-python = ">=3.10"
+dependencies = ["pyyaml>=6"]          # core has no vendor dependencies
+
+[project.optional-dependencies]
+mlflow = ["mlflow>=3.2,<4"]
+databricks = ["mlflow[databricks]>=3.2,<4"]
+langfuse = ["langfuse>=3"]
+langsmith = ["langsmith>=0.3", "langchain-core>=0.3"]
+logfire = ["logfire>=3"]
+sql = ["sqlalchemy>=2"]               # only for non-SQLite ledgers (Postgres, MySQL, ...)
+otel = ["opentelemetry-sdk>=1.27"]    # trace capture for OTel-instrumented frameworks
+langgraph = ["langchain-core>=0.3"]   # native LangChain/LangGraph callback capture
+# OpenInference instrumentors are installed per framework, e.g.
+#   pip install openinference-instrumentation-crewai openinference-instrumentation-llama-index
+dev = ["pytest>=8"]
+
+[project.scripts]
+evalops = "evalops.cli:main"
+
+# Third-party plugins register like this in THEIR pyproject:
+# [project.entry-points."evalops.plugins"]
+# braintrust = "evalops_braintrust:BraintrustPlugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]

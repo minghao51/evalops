@@ -1,0 +1,7 @@
+# evalops: commit per-env lock files and the git-plugin store; everything else is generated
+.evalops/*
+!.evalops/locks/
+!.evalops/store/
+*.egg-info/
+__pycache__/
+.venv/

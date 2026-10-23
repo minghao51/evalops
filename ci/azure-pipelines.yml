@@ -1,0 +1,35 @@
+# Copy to azure-pipelines.yml. For release approvals, move the release step into a deployment job
+# targeting an Azure DevOps environment named "production" with required approvers.
+trigger: { branches: { include: [main] } }
+pr: { branches: { include: ["*"] } }
+schedules:
+  - cron: "0 3 * * *"
+    branches: { include: [main] }
+    always: true
+parameters:
+  - { name: evidenceGroup, type: string, default: "" }
+
+pool: { vmImage: ubuntu-latest }
+variables: { EVALOPS_ENV: local, PIP_EXTRAS: "" }
+
+steps:
+  - checkout: self
+    persistCredentials: true
+    fetchDepth: 0
+  - task: UsePythonVersion@0
+    inputs: { versionSpec: "3.11" }
+  - script: pip install -e ".[$(PIP_EXTRAS)]" -r requirements.txt
+  - script: |
+      BR="${SYSTEM_PULLREQUEST_SOURCEBRANCH#refs/heads/}"
+      git checkout -B "$BR"
+      EVALOPS_PR=$(System.PullRequest.PullRequestId) EVALOPS_BRANCH="$BR" bash ci/pipeline.sh pr
+    condition: eq(variables['Build.Reason'], 'PullRequest')
+  - script: EVALOPS_BRANCH=main bash ci/pipeline.sh main
+    condition: and(eq(variables['Build.Reason'], 'IndividualCI'), eq(variables['Build.SourceBranchName'], 'main'))
+  - script: bash ci/pipeline.sh nightly
+    condition: eq(variables['Build.Reason'], 'Schedule')
+  - script: EVALOPS_BRANCH=main EVIDENCE_GROUP="${{ parameters.evidenceGroup }}" bash ci/pipeline.sh release
+    condition: and(eq(variables['Build.Reason'], 'Manual'), ne('${{ parameters.evidenceGroup }}', ''))
+  - publish: .evalops/out
+    artifact: evalops
+    condition: always()

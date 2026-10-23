@@ -1,0 +1,114 @@
+# evalops.yaml: the contract between your app, any CI system, any agent, and any backend.
+# ${ENV_VAR} and ${ENV_VAR:-default} are expanded. Pick an environment with EVALOPS_ENV.
+project: support-agent
+default_env: local
+
+# Which plugin serves each role. Roles: prompts | datasets | ledger | tracer | evaluator
+# Built-ins: git, sql, core (evaluator) / none (tracer), mlflow, langfuse, langsmith, logfire.
+# Third-party: any installed 'evalops.plugins' entry point, or "module:Class".
+plugins: {prompts: git, datasets: git, ledger: sql, tracer: none, evaluator: core}
+
+plugin_config:
+  sql: {url: "${EVALOPS_LEDGER_URL:-sqlite:///.evalops/ledger.sqlite}"}   # use Postgres etc. in CI
+
+environments:
+  local: {}                                    # zero external services; great for agents and tests
+
+  mlflow:                                      # self-hosted MLflow does everything
+    plugins: {prompts: mlflow, datasets: mlflow, ledger: mlflow, tracer: mlflow, evaluator: mlflow}
+    plugin_config:
+      mlflow: {tracking_uri: "${MLFLOW_TRACKING_URI:-http://localhost:5000}", experiment: support-agent}
+
+  databricks:
+    plugins: {prompts: mlflow, datasets: mlflow, ledger: mlflow, tracer: mlflow, evaluator: mlflow}
+    plugin_config:
+      mlflow: {tracking_uri: databricks, registry_uri: databricks-uc,
+               experiment: /Shared/support-agent, namespace: ml.genai_eval}
+    limits: {max_dataset_rows: 2000}           # documented Databricks limit at time of writing; verify
+
+  langfuse:                                    # Langfuse has no run ledger -> SQL ledger
+    plugins: {prompts: langfuse, datasets: langfuse, ledger: sql, tracer: langfuse, evaluator: langfuse}
+
+  langsmith:                                   # LangSmith tags aren't auto-movable -> prompts in git
+    plugins: {prompts: git, datasets: langsmith, ledger: sql, tracer: langsmith, evaluator: langsmith}
+
+  logfire:                                     # Logfire = tracing; core evaluator runs the eval
+    plugins: {prompts: git, datasets: git, ledger: sql, tracer: logfire, evaluator: core}
+    plugin_config:
+      logfire: {service_name: support-agent-eval, read_token: "${LOGFIRE_READ_TOKEN:-}"}
+
+  mixed-example:                               # any combination works
+    plugins: {prompts: langfuse, datasets: git, ledger: mlflow, tracer: logfire, evaluator: core}
+
+paths: {prompts: prompts, datasets: datasets, locks: .evalops}
+
+app:                                           # "module:attribute" hooks: the only app-specific code
+  behavior_config: app.evalops_hooks:behavior_config
+  predict_fn: app.evalops_hooks:build_predict_fn
+  scorers: app.evalops_hooks:build_scorers
+  judge_meta: app.evalops_hooks:judge_meta
+
+datasets:
+  golden_regression: {frozen: true}            # content changes need approval (EVALOPS_ALLOW_FROZEN_CHANGE=true)
+  smoke: {frozen: true}
+  discovery: {frozen: false}
+  # agent_golden: {frozen: true}               # agent cases with expected_tools / expected_agents / max_steps
+  # judge_calibration: {frozen: true}          # pre-recorded outputs + human_labels -> `evalops calibrate`
+
+traces:                                        # agentic trace capture (docs/AGENT_TRACES.md)
+  capture: true                                # in-process; attaches to the global OTel provider if installed
+  instrument: []                               # e.g. [langchain] | [crewai, openai] | [pydantic_ai] | "module:Class"
+  max_payload_chars: 4000                      # per span input/output stored with each run
+
+tools:                                         # @evalops.replayable record/replay
+  mode_by_stage: {dev: live, pr: replay, main: replay, nightly: live, control: replay}
+  on_miss: error                               # a replay miss means the trajectory changed
+
+eval:                                          # used by the core evaluator; native evaluators map what they can
+  max_workers: 4
+  max_scorer_workers: 2
+  retries: 3
+  backoff_seconds: 1.0
+  requests_per_minute: 120                     # shared limiter across predict + judges (core evaluator)
+  async_timeout: 300
+  repeats: {dev: 1, pr: 1, main: 3, nightly: 3, control: 3}
+  row_limits: {max_steps: 25, max_tokens: 100000, max_seconds: 180}   # per-row circuit breaker
+
+gates:
+  metrics:
+    correctness/mean: {min: 0.80, max_drop: 0.03}
+    safety/mean: {min: 0.98, max_drop: 0.0}
+    error_rate: {max: 0.02}
+    budget_exceeded_rate: {max: 0.0}
+    # agents:
+    # tool_trajectory/mean: {min: 0.9, min_ci_lower: 0.85}
+    # trace.tool_calls/mean: {max_increase_pct: 30}
+    # trace.latency_s/p95: {max_increase_pct: 25}
+  cost: {max_cost_per_row_increase_pct: 20, max_cost_per_row_usd: 0.05}
+  # reliability:                               # per-case success across repeats (agents are non-deterministic)
+  #   success: [{metric: tool_trajectory/mean, min: 1.0}]
+  #   min_pass_hat_k: 0.9
+  #   max_drop_pass_hat_k: 0.05
+
+judges:                                        # `evalops calibrate` thresholds vs human labels
+  correctness: {min_agreement: 0.85, min_kappa: 0.6}   # name = scorer name; label key in human_labels
+
+cost:
+  currency: USD
+  prices_per_1m_tokens:                        # fill from providers' CURRENT price sheets
+    generation: {input: 0.0, output: 0.0}
+    judge: {input: 0.0, output: 0.0}
+    models: {}                                 # per-model prices used with captured traces, e.g.
+    #  gpt-4o-mini: {input: 0.0, output: 0.0}  # multi-model agents (cheap router + strong worker)
+  defaults:
+    gen_calls_per_row: 1
+    gen_input_tokens_per_row: 1500
+    gen_output_tokens_per_row: 400
+    judge_input_tokens_per_call: 2000
+    judge_output_tokens_per_call: 200
+  budgets: {per_run_usd: 25, per_month_usd: 500}
+
+guard:
+  exclude: [".venv", "venv", ".git", "node_modules", "src/evalops", "tests"]
+  eval_dirs: ["eval", "tests/eval", "notebooks/eval"]
+  # allow: {"create_prompt(": ["app/admin_tools.py"]}   # explicit exceptions
