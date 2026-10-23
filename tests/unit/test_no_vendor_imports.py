@@ -4,9 +4,25 @@ The offline suite must run with only `pyyaml` (+ dev tools) installed. Vendor pl
 ``evalops/plugins`` and trace adapters in ``evalops/traces``, and both are allowed to import their
 SDKs. Everywhere else, a vendor import is allowed only as real graceful degradation: inside a
 function body, or inside a ``try`` that catches ``ImportError``/``ModuleNotFoundError`` and whose
-handlers contain no ``raise`` at all and do nothing that can raise again (only reporting calls
-rooted at ``warnings``/``logging``, plain assignments, and ``pass``). A bare ``except:`` and
+handlers contain no ``raise`` at all and do nothing that can raise again. A bare ``except:`` and
 ``except Exception`` do not count.
+
+What "nothing that can raise again" means precisely (WP0.4e): a handler is accepted only when
+*every* statement in its body is on a **whitelist of shapes** -- ``pass``/``continue``, an
+assignment (``x = None``, ``x: int = 1``, ``x += 1``, ``obj.attr = ...``) whose target and value
+are themselves whitelisted, ``return``/``return None``, or an expression statement that is a
+reporting call rooted at ``warnings``/``logging``. Every other statement disqualifies the fallback,
+and so does every non-literal expression shape: `raise`, `import`, `with`/`async with`,
+`try`/`except*`, `def`/`class`, `if`, loops, `match`, `del`, `global`/`nonlocal`; arithmetic
+(``x = 1 / 0``), comparisons, boolean and unary operators, subscripting (``x = d["k"]``),
+conditional expressions, lambdas, comprehensions, ``await``/``yield``, walrus, f-strings, starred
+unpacking, and any call not rooted at ``warnings``/``logging`` (so ``except ImportError: fallback()``
+and ``except ImportError: x = 1 / 0`` are both rejected). `return 1` is a violation too: only `None`
+may be returned, and ``del x`` is a violation because ``Delete`` is not on the statement whitelist.
+This is a whitelist of syntactic shapes, **not a proof** that the accepted
+handler cannot raise -- it is deliberately over-approximate in the safe direction, so it rejects
+some legitimate fallbacks (an f-string in a warning message, a local ``logger`` alias) rather than
+risk accepting a mandatory import in disguise.
 
 The scanner is exercised on planted violations below, so a broken scanner cannot pass silently.
 
@@ -21,6 +37,9 @@ Residual limits (documented, not bugs to rediscover):
 - Call screening is **root-name only**: ``warnings.warn``/``logging.*`` are allowed by their
   leftmost name. A local alias (``logger = logging.getLogger(...)`` then ``logger.warning(...)``)
   is therefore a violation, and a safe-looking alias cannot smuggle an unsafe call.
+- The handler whitelist is purely syntactic: it cannot see that ``x += 1`` on an operand of an
+  unexpected type may raise, and it cannot see into a call it accepts (``warnings.warn`` with a
+  hostile object as its message). It rejects shapes, not semantics.
 - Subtrees ``evalops/plugins`` and ``evalops/traces`` are exempt because they *are* the adapters;
   the guard is only meaningful for the rest of the package.
 """
@@ -85,7 +104,7 @@ def _caught_names(expr: ast.expr) -> Iterator[str]:
 
 IMPORT_ERROR_NAMES = frozenset({"ImportError", "ModuleNotFoundError"})
 
-# WP0.4d: a degradation handler must not run code that can raise, so the only calls it may make
+# WP0.4e: a degradation handler must not run code that can raise, so the only calls it may make
 # are the ones whose whole purpose is to report. Membership is tested against the *leftmost* name
 # of the call target, so `warnings.warn(...)`, `logging.warning(...)` and
 # `logging.getLogger(...).warning(...)` are safe while `contextlib.suppress(...)`, `helper()` and a
@@ -98,15 +117,6 @@ def _handler_catches_import_error(handler: ast.ExceptHandler) -> bool:
     if handler.type is None:  # bare ``except:`` also catches KeyboardInterrupt/SystemExit
         return False
     return bool(set(_caught_names(handler.type)) & IMPORT_ERROR_NAMES)
-
-
-def _handler_raises(handler: ast.ExceptHandler) -> bool:
-    """True when the handler body contains any ``raise``: bare, ``raise X`` or ``raise X from Y``.
-
-    Deliberately syntactic and conservative: the search also descends into nested function and
-    class bodies, so a ``def cleanup(): raise`` inside the handler still disqualifies the fallback.
-    """
-    return any(isinstance(node, ast.Raise) for stmt in handler.body for node in ast.walk(stmt))
 
 
 def _call_root(func: ast.expr) -> str | None:
@@ -126,29 +136,76 @@ def _call_root(func: ast.expr) -> str | None:
             return None
 
 
-def _handler_calls_unsafe_code(handler: ast.ExceptHandler) -> bool:
-    """True when the handler does something that may raise, so it is not a plain fallback.
+def _expr_is_safe(node: ast.expr | None) -> bool:
+    """True when an expression is built only from shapes that cannot raise on their own.
 
-    A call to an external helper proves nothing about that helper: it may itself raise, which turns
-    an "optional" import back into a mandatory one (``except ImportError: fallback()``). The rule is
-    therefore an allowlist of calls, not a blocklist: every ``Call`` in the handler must be rooted at
-    ``warnings``/``logging``. ``exec``/``eval``, ``contextlib.suppress(...)`` and a call hidden in a
-    ``lambda``/``def`` all fall out of that, and ``import``/``with`` statements are rejected outright
-    because both can fail on their own. Like ``_handler_raises`` the walk descends into nested
-    bodies, so a rewritten handler cannot hide a call.
+    WP0.4e: the handler body is a *whitelist of statement and expression shapes*, not an attempt to
+    prove that arbitrary code cannot raise. `x = 1 / 0` and `x = d["k"]` raise, so neither the
+    statement nor the shape it wraps may appear: only the node types accepted here and in
+    `_stmt_is_safe` are allowed, and anything outside that list disqualifies the fallback. The
+    allowlist is by node type, so an arithmetic expression is rejected even when it is harmless.
+
+    Accepted: constants (which includes ``None``/``True``/numbers/strings), names, attribute
+    access, ``dict``/``list``/``tuple``/``set`` literals of accepted elements, and calls rooted at
+    ``warnings``/``logging`` (see ``_call_root``) whose arguments are accepted too. Anything else --
+    ``x / 0``, ``not x``, ``a == b``, ``a and b``, ``d[k]``, ``a if b else c``, ``lambda``,
+    comprehensions, ``await``, ``yield``, ``x := 1``, f-strings, ``*args`` expansion -- is
+    rejected. ``None`` is the missing child of an optional node (``return``, ``x: int``).
     """
-    for stmt in handler.body:
-        for node in ast.walk(stmt):
-            if isinstance(node, (ast.Import, ast.ImportFrom, ast.With, ast.AsyncWith)):
-                return True
-            if isinstance(node, ast.Call) and _call_root(node.func) not in SAFE_CALL_ROOTS:
-                return True
+    if node is None:
+        return True
+    if isinstance(node, (ast.Constant, ast.Name)):
+        return True
+    if isinstance(node, ast.Attribute):
+        return _expr_is_safe(node.value)
+    if isinstance(node, ast.Call):
+        if _call_root(node.func) not in SAFE_CALL_ROOTS:
+            return False
+        return all(_expr_is_safe(arg) for arg in node.args) and all(
+            _expr_is_safe(keyword.value) for keyword in node.keywords
+        )
+    if isinstance(node, ast.Dict):
+        # ``key is None`` is a ``{**other}`` expansion; ``other`` must still be a safe expression
+        return all(key is None or _expr_is_safe(key) for key in node.keys) and all(
+            _expr_is_safe(value) for value in node.values
+        )
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return all(_expr_is_safe(element) for element in node.elts)
     return False
 
 
-def _handler_is_acceptable(handler: ast.ExceptHandler) -> bool:
-    """A handler is a real fallback only if it neither re-raises nor runs fallible code."""
-    return not _handler_raises(handler) and not _handler_calls_unsafe_code(handler)
+def _stmt_is_safe(stmt: ast.stmt) -> bool:
+    """True when a handler statement is ``pass``/``continue``, an assignment, or a report call.
+
+    The target of an assignment is checked with the expression allowlist, so ``x = ...`` and
+    ``obj.attr = ...`` are fine while ``d["k"] = ...`` is not. ``return`` is only accepted bare or
+    as ``return None``: a handler that returns a value would change the caller's result.
+    """
+    if isinstance(stmt, (ast.Pass, ast.Continue)):
+        return True
+    if isinstance(stmt, ast.Expr):
+        return _expr_is_safe(stmt.value)
+    if isinstance(stmt, ast.Return):
+        # bare ``return`` / ``return None`` only: a returned value would change the caller's result
+        return stmt.value is None or (isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
+    if isinstance(stmt, ast.Assign):
+        return all(_expr_is_safe(target) for target in stmt.targets) and _expr_is_safe(stmt.value)
+    if isinstance(stmt, ast.AnnAssign):
+        return _expr_is_safe(stmt.target) and _expr_is_safe(stmt.annotation) and _expr_is_safe(stmt.value)
+    # AugAssign is deliberately rejected: `x += 1` implies an arithmetic/`__iadd__` operation that
+    # can raise, and a fallback that can raise is a mandatory import in disguise (WP0.4e).
+    return False
+
+
+def _handler_is_safe(handler: ast.ExceptHandler) -> bool:
+    """True when every statement of the handler body is on the shape allowlist (WP0.4e).
+
+    Deliberately a whitelist, not a proof: ``raise``, ``import``, ``with``, ``try``, ``def``,
+    ``class``, ``if``, loops, ``match``, ``del``, ``global``/``nonlocal`` and everything else are
+    rejected by not being listed, so a handler cannot re-raise, run a nested fallible fallback, or
+    hide a call inside a nested body.
+    """
+    return all(_stmt_is_safe(stmt) for stmt in handler.body)
 
 
 def _try_is_graceful_degradation(node: ast.Try) -> bool:
@@ -162,15 +219,17 @@ def _try_is_graceful_degradation(node: ast.Try) -> bool:
     (``raise RuntimeError(...) from None``) or a nested ``def`` that raises all mean the same
     thing, so any ``raise`` in any handler of the same ``try`` forfeits the exemption.
 
-    The same holds one step weaker (WP0.4d): a handler that *calls* arbitrary code is not a
-    fallback either, because the callee may raise (``except ImportError: fallback()`` makes the
-    import mandatory again, just indirectly). Only reporting calls rooted at ``warnings`` or
-    ``logging`` -- plus assignments, ``pass`` and other call-free statements -- are accepted; see
-    ``_handler_calls_unsafe_code``. Both checks are syntactic and deliberately over-approximate.
+    The same holds one step weaker: a handler that *calls* arbitrary code is not a fallback
+    either, because the callee may raise (``except ImportError: fallback()`` makes the import
+    mandatory again, just indirectly), and neither is a handler that merely *evaluates* something
+    fallible (``except ImportError: x = 1 / 0``). A handler is therefore accepted only when every
+    statement in it matches the shape allowlist of ``_handler_is_safe``: ``pass``, ``continue``,
+    ``return``/``return None``, plain assignments, and reporting calls rooted at ``warnings`` or
+    ``logging``. The rule is syntactic and deliberately over-approximate in the safe direction.
     """
     if not any(_handler_catches_import_error(handler) for handler in node.handlers):
         return False
-    return all(_handler_is_acceptable(handler) for handler in node.handlers)
+    return all(_handler_is_safe(handler) for handler in node.handlers)
 
 
 class _ImportScanner(ast.NodeVisitor):
@@ -465,6 +524,66 @@ def test_scanner_allows_call_free_fallback_assignments():
         "try:\n    import mlflow\nexcept ImportError:\n    pass\n",
     ):
         assert scan_source(source) == [], source
+
+
+def test_scanner_rejects_fallible_expressions_in_a_handler():
+    """WP0.4e regression: the reviewer's repro -- ``x = 1 / 0`` was accepted as a fallback.
+
+    The handler looked harmless because nothing was *called*, yet the expression raises, so the
+    import is still mandatory in disguise. ``scan_source`` reported no violation before this WP.
+    """
+    probes = {
+        # the headline defect: arithmetic that raises ZeroDivisionError
+        "div_by_zero": "try:\n    import mlflow\nexcept ImportError:\n    x = 1 / 0\n",
+        # subscripting can raise KeyError/IndexError/TypeError
+        "subscript": 'try:\n    import mlflow\nexcept ImportError:\n    x = d["k"]\n',
+        # a conditional branch hides whatever the body does
+        "if_statement": "try:\n    import mlflow\nexcept ImportError:\n    if cond:\n        pass\n",
+        # returning a value changes the caller's result as well
+        "return_constant": "try:\n    import mlflow\nexcept ImportError:\n    return 1\n",
+        # del is not on the statement whitelist
+        "delete": "try:\n    import mlflow\nexcept ImportError:\n    del x\n",
+        # other fallible expression shapes: unary, compare, boolop, ifexp, lambda, comprehensions
+        "unary": "try:\n    import mlflow\nexcept ImportError:\n    x = not y\n",
+        "compare": "try:\n    import mlflow\nexcept ImportError:\n    x = a == b\n",
+        "boolop": "try:\n    import mlflow\nexcept ImportError:\n    x = a and b\n",
+        "ifexp": "try:\n    import mlflow\nexcept ImportError:\n    x = a if b else c\n",
+        "lambda": "try:\n    import mlflow\nexcept ImportError:\n    x = lambda: 0\n",
+        "listcomp": "try:\n    import mlflow\nexcept ImportError:\n    x = [i for i in y]\n",
+        "walrus": "try:\n    import mlflow\nexcept ImportError:\n    x = (y := 1)\n",
+        # subscript as an assignment *target* also calls __setitem__
+        "subscript_target": 'try:\n    import mlflow\nexcept ImportError:\n    d["k"] = None\n',
+        # augmented assignment implies an arithmetic/__iadd__ operation that can raise
+        "augassign": "try:\n    import mlflow\nexcept ImportError:\n    x += 1\n",
+    }
+    for label, source in probes.items():
+        found = scan_source(source)
+        assert found, f"scanner accepted the fallible {label} handler: {source!r}"
+        assert found[0].module == "mlflow", (label, found[0].module)
+
+
+def test_scanner_allows_assignment_and_reporting_shapes_in_a_handler():
+    """WP0.4e: ``None``/constant assignments, ``pass`` and reporting calls stay exempt."""
+    probes = {
+        "assign_none": "try:\n    import mlflow\nexcept ImportError:\n    x = None\n",
+        "assign_constant": "try:\n    import mlflow\nexcept ImportError:\n    x = SOME_CONST\n",
+        "assign_container_literal": 'try:\n    import mlflow\nexcept ImportError:\n    x = {"a": [1, 2]}\n',
+        "assign_attribute": "try:\n    import mlflow\nexcept ImportError:\n    mod.enabled = False\n",
+        "annassign": "try:\n    import mlflow\nexcept ImportError:\n    x: int = 1\n",
+        "continue": (
+            "for attempt in range(2):\n    try:\n        import mlflow\n    except ImportError:\n        continue\n"
+        ),
+        "pass": "try:\n    import mlflow\nexcept ImportError:\n    pass\n",
+        "return_none": "def f():\n    try:\n        import mlflow\n    except ImportError:\n        return None\n",
+        "return_bare": "def f():\n    try:\n        import mlflow\n    except ImportError:\n        return\n",
+        "warnings_warn": 'try:\n    import mlflow\nexcept ImportError:\n    warnings.warn("x")\n',
+        "logging_getlogger_warning": (
+            'try:\n    import mlflow\nexcept ImportError:\n    logging.getLogger(__name__).warning("x")\n'
+        ),
+    }
+    for label, source in probes.items():
+        found = scan_source(source)
+        assert found == [], f"scanner rejected the legitimate {label} fallback: {found}"
 
 
 def test_scanner_rejects_logger_call_on_a_local_alias_because_root_is_not_logging():
