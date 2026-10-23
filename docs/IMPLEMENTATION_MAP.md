@@ -204,7 +204,11 @@ family; at most two parallel workers in disjoint trees.
 | 0.3 | pending | pydantic config + JSON schema |
 | 0.4 | done | `evalops.contract.formats`, v0 read-compat, semantic fingerprints, exit 7; reviewed |
 | 0.5 | pending | envelope freeze + golden snapshots |
-| 0.6 | pending | `docs/STATE.md`, `CHANGELOG.md` |
+| 0.6 | pending | `docs/STATE.md`, `CHANGELOG.md`, first CI run |
+
+**Next increment:** WP0.3 (typed config + `docs/evalops.schema.json` + `evalops config`)
+and WP0.5 (envelope freeze) in parallel — both are code-only, disjoint files, and unblock
+phase 1 (redaction needs typed config; the gate report needs the envelope).
 
 ## 7. Review log
 
@@ -213,7 +217,21 @@ family; at most two parallel workers in disjoint trees.
 | G0-1 | BLOCK | 7 (format bypasses, scanner opt-out, config not strict, unversioned artifact, weak R1 proof, doc overreach, out-of-scope files) | WP0.4b |
 | G0-2 | BLOCK | 1 (scanner alias/chained re-raise + raising sibling handlers) | WP0.4c |
 | G0-3 | BLOCK | 1 (handler calling an external helper) | WP0.4d |
-| G0-4 | BLOCK | 2 (module docstring must state residual limits; assertion-preservation unverifiable while the file was untracked) | orchestrator docstring + phase-0 commit |
+| G0-4 | BLOCK | 2 (docstring over-claimed "nothing that can raise"; untracked file) | WP0.4e |
+| G0-5 | BLOCK | 2 (AugAssign doc/code drift; expression-statement whitelist mismatch) | bf553d4 |
+| G0-6 | BLOCK | 2 (dict unpack `{**m}` accepted; F821/mypy delegation over-claimed) | 0349263 |
+| G0-7 | BLOCK | 2 (unhashable literals not stated as a limit; stale `x += 1` example) | closed by orchestrator: doc corrected + boundary probes added (0349263+) |
 
 Lesson carried into later phases: a guard that reasons about "does this code raise?" must be
-syntactic and conservative, and every guard must state what it cannot see.
+syntactic and conservative, and every guard must state — and pin with a test — exactly what it
+cannot see. Diminishing returns are real: after round 4 the remaining defects were documentation
+accuracy, not behaviour. Future review gates cap doc-only iterations at two rounds and then close
+by orchestrator decision.
+
+### Orchestrator closures
+
+- **G0** (phase 0) — accepted. 52→55 tests, `make check` green on the local interpreter; the
+  Python 3.10–3.12 matrix is configured but has not run on GitHub yet (R11 target for WP0.6).
+  Known compromise tracked for WP1.1: `ruff format --check` covers `tests/` only; `src/` is
+  `ruff check`-clean but not format-enforced until the tree is quiet.
+

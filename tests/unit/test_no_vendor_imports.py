@@ -48,9 +48,11 @@ Residual limits (documented, not bugs to rediscover):
 - Call screening is **root-name only**: ``warnings.warn``/``logging.*`` are allowed by their
   leftmost name. A local alias (``logger = logging.getLogger(...)`` then ``logger.warning(...)``)
   is therefore a violation, and a safe-looking alias cannot smuggle an unsafe call.
-- The handler whitelist is purely syntactic: it cannot see that ``x += 1`` on an operand of an
-  unexpected type may raise, and it cannot see into a call it accepts (``warnings.warn`` with a
-  hostile object as its message). It rejects shapes, not semantics.
+- The handler whitelist is purely syntactic: it rejects *shapes*, not semantics. It cannot prove
+  an accepted shape is safe -- ``x = {[]}`` and ``x = {[]: None}`` build unhashable literals and
+  raise ``TypeError`` -- and it cannot see into a call it accepts (``warnings.warn`` with a hostile
+  object as its message). It also cannot see that ``x += 1`` would raise, which is why augmented
+  assignment is rejected outright rather than analysed.
 - Subtrees ``evalops/plugins`` and ``evalops/traces`` are exempt because they *are* the adapters;
   the guard is only meaningful for the rest of the package.
 """
@@ -153,9 +155,10 @@ def _expr_is_safe(node: ast.expr | None) -> bool:
     This is a shape check, **not** a no-raise proof: an accepted name can be unbound (NameError)
     and an accepted attribute can be missing (AttributeError). ruff ``F821`` catches the former;
     mypy catches the attributes it can resolve statically; a dynamically typed attribute can still
-    fail at runtime with nothing reporting it. What this function does guarantee is that no
-    fallible *work* is hidden in an accepted shape: arithmetic, comparisons, subscripting,
-    calls to non-reporting code, comprehensions, unpacking and the rest are rejected by node type.
+    fail at runtime with nothing reporting it. The same applies to literals: a set or dict literal
+    whose elements are unhashable (``{[]}``, ``{[]: None}``) raises ``TypeError`` and is accepted
+    here. What this function does reject, by node type, is fallible *work*: arithmetic,
+    comparisons, subscripting, calls to non-reporting code, comprehensions and unpacking.
 
     WP0.4e: the handler body is a *whitelist of statement and expression shapes*, not an attempt to
     prove that arbitrary code cannot raise. `x = 1 / 0` and `x = d["k"]` raise, so neither the
@@ -625,9 +628,9 @@ def test_scanner_allows_assignment_and_reporting_shapes_in_a_handler():
 def test_documented_boundary_name_and_attribute_errors_are_static_analysis_territory():
     """Pin the guard's documented limit so it cannot be mistaken for a no-raise proof.
 
-    ``x = NEVER_DEFINED`` raises NameError when the vendor SDK is missing, and ``obj.attr`` can
-    raise AttributeError -- the shape whitelist accepts both, because proving otherwise requires
-    flow/interprocedural analysis and belongs to ruff ``F821`` and mypy, which run in `make check`.
+    ``x = NEVER_DEFINED`` raises NameError when the vendor SDK is missing, ``obj.attr`` can raise
+    AttributeError, and ``{[]}``/``{[]: None}`` raise TypeError -- the shape whitelist accepts all
+    of them, because proving otherwise needs flow/hashability analysis, not an import-shape check.
     This test asserts the accepted boundary explicitly: if someone tightens the guard to reject
     these shapes, this test fails and the docstring must be updated with it.
     """
@@ -635,6 +638,9 @@ def test_documented_boundary_name_and_attribute_errors_are_static_analysis_terri
         "undefined_name": "try:\n    import mlflow\nexcept ImportError:\n    x = NEVER_DEFINED\n",
         "attribute_read": "try:\n    import mlflow\nexcept ImportError:\n    x = mod.enabled\n",
         "reporting_root_trusted_by_name": 'try:\n    import mlflow\nexcept ImportError:\n    warnings.warn("x")\n',
+        # literals are shape-checked, not hashability-checked: these raise TypeError at runtime
+        "unhashable_set_literal": "try:\n    import mlflow\nexcept ImportError:\n    x = {[]}\n",
+        "unhashable_dict_key": "try:\n    import mlflow\nexcept ImportError:\n    x = {[]: None}\n",
     }
     for label, source in boundary.items():
         assert scan_source(source) == [], f"boundary {label} is no longer accepted; update the docstring"
