@@ -201,7 +201,7 @@ family; at most two parallel workers in disjoint trees.
 | 0.0 | done | baseline import commit `0a538e2` |
 | 0.1 | done | `docs/CONTRACT.md`, ADRs 0001–0007; reviewed |
 | 0.2 | done | `tests/{unit,integration}`, recursive runner, ruff/mypy/CI, no-vendor AST guard; reviewed |
-| 0.3 | pending | pydantic config + JSON schema |
+| 0.3 | done | pydantic config package, generated schema, `evalops config`; reviewed |
 | 0.4 | done | `evalops.contract.formats`, v0 read-compat, semantic fingerprints, exit 7; reviewed |
 | 0.5 | pending | envelope freeze + golden snapshots |
 | 0.6 | pending | `docs/STATE.md`, `CHANGELOG.md`, first CI run |
@@ -221,6 +221,9 @@ phase 1 (redaction needs typed config; the gate report needs the envelope).
 | G0-5 | BLOCK | 2 (AugAssign doc/code drift; expression-statement whitelist mismatch) | bf553d4 |
 | G0-6 | BLOCK | 2 (dict unpack `{**m}` accepted; F821/mypy delegation over-claimed) | 0349263 |
 | G0-7 | BLOCK | 2 (unhashable literals not stated as a limit; stale `x += 1` example) | closed by orchestrator: doc corrected + boundary probes added (0349263+) |
+| WP0.3-1 | BLOCK | 3 (`max_mae` rejected, plugin roles unconstrained, out-of-scope docs) | WP0.3b |
+| WP0.3-2 | BLOCK | 2 (schema allowed null role values the runtime rejected; `max_mae: null` crashed calibration) | WP0.3c + orchestrator `threshold: null` fix |
+| WP0.3-3 | PASS | 0 (residual: `threshold: null`, fixed by orchestrator immediately) | f0da4ce |
 
 Lesson carried into later phases: a guard that reasons about "does this code raise?" must be
 syntactic and conservative, and every guard must state — and pin with a test — exactly what it
