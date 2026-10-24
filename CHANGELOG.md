@@ -7,6 +7,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP2.2 release re-verification (2026-10-24):** `pipeline release` re-verifies before promoting:
+  `guard` → `gate --group $EVIDENCE_GROUP` (a fresh re-check — a group failing today's rules stops
+  the stage at exit 1 before any alias moves) → `baseline` (a recorded verification step; the
+  nightly-only `baseline.json` write stays nightly) → `promote` → `commit_state`; dry-run shape
+  unchanged (five steps, `<EVIDENCE_GROUP>` placeholders). `promote --alias production` binds the
+  evidence group to the version it released via additive ledger tags (`evalops.released.production`,
+  `evalops.released.app_version`) and refuses (exit 4, naming the group and the released version) a
+  group already released — a stale group can no longer be re-released through the front door;
+  `candidate`/`staging` are unchanged and re-runnable. `commit_state` routes to a force-pushed bot
+  branch `refs/heads/evalops/state/pr-<EVALOPS_PR>` when `EVALOPS_PR` is set (a fork PR cannot push
+  `.evalops/locks` to the protected source branch; the bot branch is derived state where the latest
+  run wins, so `--force` is the correct semantics; `EVALOPS_BRANCH` is not required on that path;
+  without `EVALOPS_PR` behavior is byte-identical). `pipeline nightly` with no production baseline
+  fails loudly: exit 1, actionable remedy in `errors[0].message`, the control step recorded failed,
+  no checkout — replacing the WP2.1 exit-0 skip (its pin was replaced, not deleted). 321 → 329
+  tests; review: 1 round PASS, 0 defects; the reviewer independently reproduced all four packet
+  mutations (gate-step deletion, skip revert, refusal removal, `--force` drop).
 - **WP2.3 presets (2026-10-24):** `evalops init --preset <p>` renders a validated `evalops.yaml`
   for the 7 D8 presets (`local, mlflow, databricks, langfuse, langsmith, logfire, mixed`) —
   vendor URLs/keys are `${VAR:-placeholder}` interpolations, never literals, the render goes through

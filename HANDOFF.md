@@ -1,22 +1,22 @@
-# HANDOFF: evalops — phase 2 in progress (WP2.1 + WP2.3 done; WP2.2/2.4/2.5 remain)
+# HANDOFF: evalops — phase 2 in progress (WP2.1 + WP2.2 + WP2.3 done; WP2.4/2.5 remain)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
 (tests: **321 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 has WP2.2 (release
-re-verification), WP2.4 (CI adapters) and WP2.5 (calibration enforcement) open. The completed
+`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 has WP2.4 (CI
+adapters) and WP2.5 (calibration enforcement) open. The completed
 `docs/packets/WP2.1.md` / `WP2.3.md` are the packet templates.
 
 ## 0. Current snapshot (start here)
 
 | | |
 |---|---|
-| Verified base | `4f8da78` (this docs commit sits on top) — CI run `40091261008` green on py3.10 / 3.11 / 3.12 |
-| Tests | 321 offline (`make check`), standalone 321/321, 1 Postgres contract test (excluded) |
+| Verified base | `86f75fa` (WP2.2) — CI run `40095127593` green on py3.10 / 3.11 / 3.12 |
+| Tests | 329 offline (`make check`), standalone 329/329, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
-| Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`); **WP2.2 / WP2.4 / WP2.5 remain** |
+| Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`), **WP2.2 done** (`86f75fa`); **WP2.4 / WP2.5 remain** |
 | Tree | clean; no uncommitted work |
-| Next artifact | `docs/packets/WP2.2.md` (copy `docs/packets/WP2.3.md`, the newest template) |
+| Next artifact | `docs/packets/WP2.4.md` (copy `docs/packets/WP2.2.md`, the newest template) |
 | Gate ahead | **G2**: pipeline parity, 7 presets, calibration enforced; tag **v0.4.0** |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
@@ -129,8 +129,8 @@ the G1 close and WP2.1 while another session was working. Before you start anyth
    duplicate implementations so far found genuine gaps (WP1.2: none surfaced; WP2.1: the shim's
    missing exec bit → `b670d7b`). Local side branches `wp12-alternative-33ec945` and
    `wp21-alternative-fe6a1c5` exist on this machine as references.
-4. **Stay in disjoint trees when racing:** if their docs commit says "WP2.2 is next", take WP2.4
-   or WP2.5 instead (the project's own rule: two parallel workers only in disjoint trees).
+4. **Stay in disjoint trees when racing:** if their docs commit says "WP2.4 is next", take
+   WP2.5 instead (the project's own rule: two parallel workers only in disjoint trees).
 5. Small increments: feature commit → push → docs commit → push, so a collision costs minutes,
    not a WP.
 
@@ -150,6 +150,7 @@ Observed review budget:
 | WP1.5 trace v2 | (parallel session) | — |
 | WP2.1 pipeline | (parallel session) 1 BLOCK + 2 narrow rounds; exec-bit fix `b670d7b` found by cross-check: 1 narrow round + narrow re-review | 2 |
 | WP2.3 presets | 1 (PASS, 0 defects; reviewer re-rendered all 7 presets + re-ran drift mutations) | 0 |
+| WP2.2 release re-verification | 1 (PASS, 0 defects; reviewer re-ran the fixture paths, the envelope check and all 4 mutations) | 0 |
 
 Budget 1–3 rounds. Do not skip review to save time — every round found something real. If you find a
 leak after a PASS (as happened in WP1.1 with replay-miss tool args), dispatch a narrow fix round and
@@ -176,6 +177,7 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round PASS + 1 narrow re-review) |
 | 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds) + exec-bit fix `b670d7b` |
 | 2.3 presets (`init --preset` ×7, capability matrix from code, generated `docs/CAPABILITIES.md`) | done | `684c629` (1 review round: PASS, 0 defects) |
+| 2.2 release re-verification + released-group binding + fork-PR bot branch + nightly loud failure | done | `86f75fa` (1 review round: PASS, 0 defects) |
 
 **G1 closed** (2026-10-24, at 283 tests): standalone 283/283, Postgres contract 1 passed, `make schema`
 zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
@@ -202,7 +204,7 @@ Read them before promising anything. The ones that bite:
   `data.steps` but that branch is untested (needs mocking `_git`);
 - `ci_log.jsonl` is now one JSON envelope per line (bash teed multi-line rendered envelopes).
 
-## 6. Phase status — phase 1 closed (G1); phase 2 at WP2.2/2.4/2.5
+## 6. Phase status — phase 1 closed (G1); phase 2 at WP2.4/2.5
 
 ### WP1.4 — test debt (DONE, `1237611`)
 
@@ -267,17 +269,27 @@ outcome (local healthy; vendor presets name the missing module). 16 new tests (3
 Review: 1 round PASS, 0 defects; the reviewer independently re-rendered all 7 presets, validated
 schema conformance + interpolation-only credentials, and re-ran the drift mutations.
 
-### WP2.2 — release re-verification, fork-PR locks, nightly baseline (NEXT)
+### WP2.2 — release re-verification, fork-PR locks, nightly baseline (DONE, `86f75fa`)
 
-Write the packet from the map's phase-2 row. Deliverables:
-- **Release re-verification:** `release` refuses an evidence group that never passed the gate, and
-  re-checks guard + gate + baseline before promoting; bind the evidence group to the promoted
-  version (params/tags) so a stale group cannot be promoted.
-- **Fork-PR locks:** a PR from a fork cannot push locks to the source branch; handle it via a bot
-  branch (or a clear refusal), with the path tested in a fixture repo.
-- **Nightly baseline:** when there is no baseline, nightly **fails loudly** (non-zero, actionable
-  message) instead of the current exit-0 skip.
-- Keep the WP2.1 stage table/dry-run shape; add the new steps to the table and the dry-run.
+`pipeline release` now re-verifies before promoting: `guard` → `gate --group $EVIDENCE_GROUP`
+(a **fresh** re-check — a group failing today's rules stops the stage at exit 1 before any alias
+moves; deleting the gate step from the table turns its test red) → `baseline` (a recorded
+verification step in `data.steps`/`ci_log.jsonl`; the nightly-only `baseline.json` write stays
+nightly) → `promote` → `commit_state`; the dry-run keeps the WP2.1 shape (five steps,
+`<EVIDENCE_GROUP>` placeholders). `promote --alias production` binds the group to the version it
+released (additive tags `evalops.released.production` / `evalops.released.app_version`, the same
+value the baseline pin reads) and refuses an already-released group with exit 4 naming the group
+and version — a stale group cannot be re-released through the front door. `commit_state` routes
+to a force-pushed bot branch `refs/heads/evalops/state/pr-<EVALOPS_PR>` when `EVALOPS_PR` is set
+(a fork PR cannot push locks to the protected source branch; `EVALOPS_BRANCH` not required on
+that path; byte-identical behavior otherwise). Nightly without a baseline **fails loudly**
+(exit 1, remedy in `errors[0].message`, failed control step, no checkout) — the WP2.1 exit-0 skip
+pin was replaced per the packet's D2. 8 new tests + 1 replaced (321 → 329). Review: 1 round PASS,
+0 defects; the reviewer re-ran the fixture paths, the envelope discipline (raw `subprocess`
+single-document check) and all four mutations on /tmp copies. Residual (non-blocking): the
+`released.app_version` fallback for runs without an `app_version` param is unpinned; `main`/
+`release` with `EVALOPS_PR` set also route to the bot branch (shared path) but only `pr` is
+pinned.
 
 ### WP2.4 — CI adapters generated from one template (after 2.2)
 
@@ -291,7 +303,7 @@ Write the packet from the map's phase-2 row. Calibration below `judges.min_agree
 fails `pr`; the step already exists in the stage table (conditional on the dataset file), so this
 is enforcement semantics + tests, not new plumbing.
 
-After 2.2 + 2.4 + 2.5: run the map's G2 checklist and tag **v0.4.0** (D10).
+After 2.4 + 2.5: run the map's G2 checklist and tag **v0.4.0** (D10).
 
 ## 7. Remaining roadmap (phases 2 → 6)
 
@@ -371,11 +383,12 @@ sed -n '/### Phase 2/,/### Phase 3b/p' docs/IMPLEMENTATION_MAP.md
 
 Then:
 
-1. **Check §4's coordination rules first.** If `origin/main` already has a WP2.2 feature commit,
-   take WP2.4 or WP2.5 instead (disjoint trees); if not, write the WP2.2 packet from the map's
-   phase-2 row (copy `docs/packets/WP2.3.md`'s shape — it is the newest template) and dispatch it
-   to `evalops-worker` (`deepseek/deepseek-flash`, cwd = the repo). Read the current
-   `release`/`nightly` stages in `src/evalops/pipeline.py` and the G2 gate first.
+1. **Check §4's coordination rules first.** If `origin/main` already has a WP2.4 (or WP2.5)
+   feature commit, take the other one instead (disjoint trees) and cross-check their work; if
+   not, write the WP2.4 packet from the map's phase-2 row (copy `docs/packets/WP2.2.md`'s shape —
+   it is the newest template) and dispatch it to `evalops-worker` (`deepseek/deepseek-flash`, cwd
+   = the repo). Read the current `ci/*.yml` adapters and the capabilities generator
+   (`make capabilities`) first — it is the code→doc pattern WP2.4 mirrors.
 2. Send the working tree (untracked test files included) to `evalops-reviewer`
    (`zai/glm-5.3-flash`, thinking `high`) with the packet's done-when.
 3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), fetch/rebase,
@@ -384,13 +397,12 @@ Then:
 
 Suggested opening message for the new thread:
 
-> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. We are in phase 2: WP2.1 (pipeline)
-> and WP2.3 (presets + capability matrix) are done; WP2.2, WP2.4 and WP2.5 remain, then G2 tags
-> v0.4.0. A second agent session may be working this repo — follow HANDOFF §4's coordination rules
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. We are in phase 2: WP2.1 (pipeline),
+> WP2.2 (release re-verification) and WP2.3 (presets + capability matrix) are done; WP2.4 and
+> WP2.5 remain, then G2 tags v0.4.0. A second agent session may be working this repo — follow HANDOFF §4's coordination rules
 > (fetch before dispatch, fetch/rebase before every commit, never reimplement a WP that already
-> landed, stay in disjoint trees). Start WP2.2 (release re-verification: refuse an evidence group
-> that never passed the gate, bind the group to the promoted version, fork-PR locks via a bot
-> branch, nightly fails loudly without a baseline): write the packet in the shape of
-> `docs/packets/WP2.3.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash), review with
-> `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI.
-> If origin/main already has WP2.2, do WP2.4 instead.
+> landed, stay in disjoint trees). Start WP2.4 (CI adapters: all four of GH/GitLab/Azure/Jenkins
+> rendered from one template, calling `evalops pipeline`, no logic in YAML): write the packet in
+> the shape of `docs/packets/WP2.2.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash),
+> review with `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and
+> check CI. If origin/main already has WP2.4, do WP2.5 (calibration enforcement) instead.
