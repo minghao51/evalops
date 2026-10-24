@@ -30,7 +30,9 @@ message) when the ``baseline`` step reports no production baseline.
 
 Exit codes are never collapsed: a failed step propagates its own code (1 gate, 2 usage, 3 budget,
 4 guard, 5 runtime, 6 capability, 7 contract) through an ``EvalOpsError`` that carries ``data``, so
-the failure envelope keeps ``data.steps`` and names the stage and step in ``errors[0].message``.
+the failure envelope keeps ``data.steps`` and names the stage and step in ``errors[0].message``. A
+failed ``calibrate`` also names every failing check (judge, metric, required limit, measured value)
+there, built from its ``data.checks`` payload; every other step's message is unchanged.
 
 ``--dry-run`` exits 0 and writes nothing (no file, no log, no git state): it lists exactly the
 steps the real run would execute, with placeholders for values only a real run knows (``<group from
@@ -136,6 +138,8 @@ class _Context:
     baseline_sha: str = ""
     pending_undo: list[_Step] = field(default_factory=list)
     error_detail: str = ""
+    #: the failed nested step's ``data`` (``calibrate``'s failing checks are mined from it)
+    error_data: dict[str, Any] = field(default_factory=dict)
 
     def calibration_present(self) -> bool:
         return (self.cfg.path("datasets") / f"{self.calibration}.jsonl").exists()
@@ -422,9 +426,43 @@ def _failed_entry(ctx: _Context, step: _Step, exc: EvalOpsError) -> dict[str, An
 
 
 def _step_detail(ctx: _Context, entry: dict[str, Any]) -> str:
-    """`errors[0].message` names the stage, the step and (when it has one) the nested reason."""
+    """`errors[0].message` names the stage, the step and (when it has one) the nested reason.
+
+    A failed calibration also lists the checks that failed, built from its payload: a CI log that
+    only said "judge calibration FAILED" could not tell an operator which judge, metric, required
+    limit or measured value to fix.
+    """
     message = f"pipeline {ctx.stage} step '{entry['name']}' failed with exit code {entry['code']}"
-    return f"{message}: {ctx.error_detail}" if ctx.error_detail else message
+    if ctx.error_detail:
+        message = f"{message}: {ctx.error_detail}"
+    failing = _failing_calibration_checks(ctx.error_data)
+    return f"{message}; failing checks: {', '.join(failing)}" if failing else message
+
+
+def _failing_calibration_checks(data: dict[str, Any]) -> list[str]:
+    """`calibrate`'s failing `data.checks`, as ``<check> (measured <candidate>)``.
+
+    Keyed on the payload shape, never on the step name: ``checks`` is a list of objects carrying a
+    string ``check`` and ``passed is False``. ``gate``'s checks have the *same* entry shape, so the
+    discriminator is ``data.judges`` -- ``calibrate`` reports per-judge stats next to its checks and
+    no other command does. Without that discriminator every gate failure message would gain the
+    clause too, and those messages stay byte-identical to the pre-WP2.5 pipeline.
+    """
+    if not isinstance(data.get("judges"), dict):
+        return []
+    checks = data.get("checks")
+    if not isinstance(checks, list):
+        return []
+    clauses: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        text = check.get("check")
+        if not isinstance(text, str) or check.get("passed") is not False:
+            continue
+        measured = check.get("candidate")
+        clauses.append(text if measured is None else f"{text} (measured {measured})")
+    return clauses
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +485,8 @@ def _execute_evalops(ctx: _Context, step: _Step) -> dict[str, Any]:
     if not entry["ok"]:
         errors = nested.get("errors") or [{}]
         ctx.error_detail = str(errors[0].get("message") or "")
+        nested_data = nested.get("data")
+        ctx.error_data = nested_data if isinstance(nested_data, dict) else {}
     return entry
 
 
