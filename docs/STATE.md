@@ -4,15 +4,18 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 1 WPs complete — WP1.1 (redaction), WP1.3 (statistics), WP1.2 (ledger integrity),
-  WP1.4 (test debt) and WP1.5 (trace model v2) done; next the G1 checklist, then phase 2.
-- **Tests:** 283 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
-  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40069033269`, WP1.4 docs).
+- **Phase:** **G1 closed** — phase 1 WPs complete (WP1.1, WP1.2, WP1.3, WP1.4, WP1.5); next
+  phase 2 WP2.1 (`evalops pipeline <stage>`).
+- **Tests:** 283 green (`make check`), 17 at baseline. **Postgres contract:** 1 passed with
+  `.[sql]` + docker. **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40078618397`,
+  WP1.5).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** run the map's G1 checklist (redaction proven, formats verified, statistics
-  property-tested, every exit path tested, trace v1/v2 compatibility) and update this board; then
-  phase 2 WP2.1 (`evalops pipeline`). Postgres contract suite: `make contract` with `evalops[sql]`
-  installed.
+- **G1 evidence (2026-10-24):** redaction property tests, format v0/v1 + future-version reads,
+  statistics property tests, exit 0–7 through real commands, trace v1/v2 compatibility; `make
+  check` 283, standalone 283/283, `make schema` zero drift, goldens untouched; Postgres contract
+  1 passed (`.[sql]`, docker). CI run `40078618397`.
+- **Next:** write the WP2.1 packet from the map's phase-2 row and dispatch it; the packet shape is
+  `docs/packets/WP1.5.md`. Contract suite: `make contract` with `evalops[sql]` installed.
 
 ## Work packages
 
@@ -30,6 +33,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` (2 review rounds: PG race, dialect dispatch) |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` (1 review round: PASS, 0 defects; 1 bug fix: `traces` usage exit) |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round: PASS, 0 defects + 1 narrow re-review) |
+| **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
 
 ## Known compromises (tracked, not forgotten)
 

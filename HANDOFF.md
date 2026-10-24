@@ -1,10 +1,10 @@
-# HANDOFF: evalops — phase 1 WPs done (G1 next)
+# HANDOFF: evalops — phase 1 closed (G1); phase 2 next (WP2.1)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
 (tests: **283 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; `docs/packets/WP1.5.md` is the completed WP1.5 dispatch
-(kept as the packet template — copy its shape for WP2.1).
+`docs/STATE.md` is the short status board; G1 is closed and phase 2 starts at WP2.1. The completed
+`docs/packets/WP1.5.md` is the packet template.
 
 ---
 
@@ -114,8 +114,11 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round PASS + 1 narrow re-review) |
 
+**G1 closed** (2026-10-24): 283 tests, standalone 283/283, Postgres contract 1 passed, `make schema`
+zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
+
 CI green on `main` after each docs commit: `40054567708` (WP1.1), `40058469207` (WP1.3),
-`40065497434` (WP1.2), `40068844584` (WP1.4), `40069033269` (WP1.4 docs).
+`40065497434` (WP1.2), `40068844584` (WP1.4), `40069033269` (WP1.4 docs), `40078618397` (WP1.5).
 
 **Carried compromises** — 10 items, tracked in [`docs/STATE.md`](docs/STATE.md) §Known compromises.
 Read them before promising anything. The ones that bite:
@@ -129,7 +132,7 @@ Read them before promising anything. The ones that bite:
 - pass^k is the plug-in estimator; row alignment falls back to `row_id` without `row_key`;
 - a mid-artifact-loop backend write failure can leave a prefix (no manifest yet to flag it).
 
-## 6. Phase 1 — what is left
+## 6. Phase 1 — closed (G1); phase 2 starts at WP2.1
 
 ### WP1.4 — test debt (DONE, `1237611`)
 
@@ -152,21 +155,30 @@ path, including async-only `max_seconds`. 36 new tests (246 → 283); 1 review r
 plus a narrow re-review that scoped the dataset-fingerprint claim (an embedded trace is fingerprinted
 verbatim by design).
 
-### G1 gate (phase 1 exit — NEXT)
+### G1 gate (phase 1 exit — CLOSED 2026-10-24)
 
-Run the map's G1 checklist and update `docs/STATE.md`:
-- **Redaction proven:** the three boundaries, `strict` refusal, idempotence property tests.
+Every checklist item holds; evidence:
+- **Redaction proven:** the three boundaries, `strict` refusal, hypothesis idempotence tests
+  (`tests/unit/test_redact.py`).
 - **Formats verified:** v0 reads, v1 round-trip, future `schema_version` → exit 7, semantic
-  fingerprints unchanged by metadata (including the new nested trace version).
+  fingerprints unchanged by metadata (`tests/unit/test_formats_v1.py`, including the nested trace
+  version).
 - **Statistics property-tested:** pass^k monotone, CI shrinks with n, row alignment survives a
-  dataset reorder, drift names the changed param.
-- **Every exit path tested:** 0–7 through real commands, exit 4 through `promote`'s guard.
-- **Trace compatibility:** v1 artifacts gate, v2 round-trips, unknown attrs reported.
-- **Gates green:** `make check`, standalone runner, `make contract` (Postgres, if docker), `make
-  schema` zero drift, no golden changes.
+  dataset reorder, drift names the changed param (`tests/unit/test_gate_stats.py`, hypothesis).
+- **Every exit path tested:** 0–7 through real commands, exit 4 through `promote`'s guard
+  (`tests/unit/test_exit_codes.py`).
+- **Trace compatibility:** v1 artifacts gate, v2 round-trips, unknown attrs reported
+  (`tests/unit/test_trace_format.py`, `test_trace_fixtures.py`, `test_trace_breaker.py`).
+- **Gates green:** `make check` 283, standalone 283/283, `make contract` 1 passed with `.[sql]` +
+  docker, `make schema` zero drift, no golden change. CI `40078618397` (py3.10/3.11/3.12).
 
-If every item holds, record G1 closed in `STATE.md` and start phase 2 (WP2.1). If one fails, write a
-narrow WP for it instead of closing the gate.
+### WP2.1 — `evalops pipeline <stage>` (NEXT)
+
+Write the packet from the map's phase-2 row. Expected done-when: a Python `evalops pipeline
+<stage>` (pr/main/release/nightly) with a declarative stage table, `--dry-run`, idempotent stages,
+and `ci/pipeline.sh` reduced to a shim; a fixture repo reproduces the bash stages and the dry-run
+lists every command it would run. Read `ci/pipeline.sh` and the phase-2 gate G2 (tag v0.4.0) before
+scoping.
 
 ## 7. Remaining roadmap (phases 2 → 6)
 
@@ -241,19 +253,20 @@ sed -n '/### Phase 1/,/### Phase 2/p' docs/IMPLEMENTATION_MAP.md
 
 Then:
 
-1. Run the G1 checklist from §6 and update `docs/STATE.md`. If it holds, G1 is closed; if not, write
-   a narrow WP for the failing item.
-2. Write the WP2.1 packet from the map's phase-2 row (copy `docs/packets/WP1.5.md`'s shape) and
-   dispatch it to `evalops-worker` (`deepseek/deepseek-flash`) with `cwd` = the repo.
-3. Send the working tree (untracked test files included) to `evalops-reviewer`
+1. Write the WP2.1 packet from the map's phase-2 row (copy `docs/packets/WP1.5.md`'s shape) and
+   dispatch it to `evalops-worker` (`deepseek/deepseek-flash`) with `cwd` = the repo. Read
+   `ci/pipeline.sh` and the G2 gate first.
+2. Send the working tree (untracked test files included) to `evalops-reviewer`
    (`zai/glm-5.3-flash`, thinking `high`) with the packet's done-when.
-4. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), push, and
+3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), push, and
    confirm CI with `gh run list`.
+4. Then WP2.2 (release re-verification, fork-PR locks, nightly baseline) and WP2.3 (presets), toward
+   G2 / tag `v0.4.0`.
 
 Suggested opening message for the new thread:
 
-> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. The phase-1 WPs are done; run the G1
-> checklist from HANDOFF §6, update `docs/STATE.md`, then start phase 2: write the WP2.1 packet in
-> the shape of `docs/packets/WP1.5.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash),
-> review with `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and
-> check CI.
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. Phase 1 is closed (G1). Start phase 2:
+> write the WP2.1 packet (`evalops pipeline <stage>` in Python, `--dry-run`, idempotent stages, bash
+> shim) in the shape of `docs/packets/WP1.5.md`, dispatch it to `evalops-worker`
+> (deepseek/deepseek-flash), review with `evalops-reviewer` (zai/glm-5.3-flash, high), commit only
+> after PASS, then push and check CI.

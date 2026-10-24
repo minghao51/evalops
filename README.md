@@ -4,13 +4,13 @@
 
 evalops is a backend-agnostic tool for versioning, evaluation, gating, and cost control of LLM apps **and agents**.
 
-> Status: phase 1 WPs complete (G1 checklist next) — contract, typed config, versioned formats,
-> frozen `--json` envelope, payload redaction (WP1.1), gate statistics (WP1.3: sample stdev,
-> Wilson/bootstrap CIs, stable row identity, pinned baseline, drift + change attribution), ledger
-> integrity (WP1.2: schema migrate/verify, atomic monthly budget, N+1-free `find_runs`), test debt
-> (WP1.4: every exit path 0–7 through real commands) and trace model v2 (WP1.5: nested trace
-> `schema_version`, reported unknown attributes, breaker parity) are done — see
-> [`HANDOFF.md`](HANDOFF.md) and [`docs/IMPLEMENTATION_MAP.md`](docs/IMPLEMENTATION_MAP.md).
+> Status: **G1 closed — phase 1 complete.** Contract, typed config, versioned formats, frozen
+> `--json` envelope, payload redaction (WP1.1), gate statistics (WP1.3: sample stdev, Wilson/bootstrap
+> CIs, stable row identity, pinned baseline, drift + change attribution), ledger integrity (WP1.2:
+> schema migrate/verify, atomic monthly budget, N+1-free `find_runs`), test debt (WP1.4: every exit
+> path 0–7 through real commands) and trace model v2 (WP1.5: nested trace `schema_version`, reported
+> unknown attributes, breaker parity) are done. Phase 2 (CLI/pipeline as code + presets) is next —
+> see [`HANDOFF.md`](HANDOFF.md) and [`docs/IMPLEMENTATION_MAP.md`](docs/IMPLEMENTATION_MAP.md).
 
 - **Backends:** MLflow (local or Databricks), Langfuse, LangSmith, Logfire, plain git + SQL, or your own plugin.
 - **Runs under:** GitHub, GitLab, Azure DevOps, Jenkins, Databricks jobs, cron, or by hand.
