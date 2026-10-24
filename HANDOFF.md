@@ -17,7 +17,7 @@ reproducibility (cassettes).
 - **Backends:** MLflow / Databricks, Langfuse, LangSmith, Logfire, plain git + SQL, or your plugin.
 - **Interface:** one CLI for humans, CI and coding agents — stable exit codes `0–7`, frozen JSON envelope.
 - **History:** v0.3.0 imported as the baseline (`0a538e2`, 17 tests). Phase 0 added the contract,
-  typed config, versioned formats, envelope and dev tooling. **Now 125 tests, all offline.**
+  typed config, versioned formats, envelope and dev tooling. **Now 151 tests, all offline.**
 
 ## 2. Non-negotiables (read before editing anything)
 
@@ -44,7 +44,7 @@ or `uv`:
 
 ```bash
 cd evalops
-.venv/bin/python -m pytest -q          # 125 tests
+.venv/bin/python -m pytest -q          # 151 tests
 .venv/bin/python tests/run_without_pytest.py   # dependency-free runner
 make check                             # ruff + mypy + pytest (what CI runs)
 make schema                            # regenerate docs/evalops.schema.json
@@ -60,20 +60,21 @@ Three agents, defined in `.pi/agents/` (project scope, symlinked at the session 
 |---|---|---|
 | `evalops-scout` | `deepseek/deepseek-flash` | read-only recon, compressed findings with `file:line` |
 | `evalops-worker` | `deepseek/deepseek-flash` | implements exactly one WP, tests green, **no commits** |
-| `evalops-reviewer` | `openai-codex/gpt-6-luna` @ xhigh | adversarial review: runs commands, falsifies claims, PASS/BLOCK |
+| `evalops-reviewer` | `zai/glm-5.3-flash` @ high | adversarial review: runs commands, falsifies claims, PASS/BLOCK |
 
 Per WP: **packet → worker → reviewer → orchestrator commits**. The packet must state goal, allowed
 paths, forbidden actions, falsifiable done-when, and the exact commands to run. Writers are
 serialized per module family; at most two parallel workers in disjoint trees.
 
-Observed in phase 0: 12 BLOCK rounds / 35 defects. Phases 1–2 WPs will take 2–3 rounds each.
+Observed in phase 0: 12 BLOCK rounds / 35 defects. WP1.1: 4 rounds (2 BLOCK, then 2 PASS after an
+orchestrator-found replay-miss leak), 6 defects. Phases 1–2 WPs will take 2–3 rounds each.
 Budget for it; do not skip review to "save time" — every round found something real, including a
 functional regression (`rollback --version 1` being parsed as the top-level version flag).
 
 Commit style: one logical change per commit, imperative subject, body explains the *why*, the WP id,
 and the review rounds. Never commit with a red suite.
 
-## 5. Where phase 0 left off
+## 5. Where phase 1 left off
 
 | WP | State | Evidence |
 |---|---|---|
@@ -84,36 +85,34 @@ and the review rounds. Never commit with a red suite.
 | 0.4 versioned formats + semantic fingerprints | done | `6280873` |
 | 0.5 envelope freeze + 17 goldens + exit matrix 0–7 | done | `7d7d8f1` |
 | 0.6 state/changelog/**first CI run** | done | run `40047473262`: 3.10/3.11/3.12 all green |
+| 1.1 redaction (3 boundaries, strict, `redact --check`, demo of `src/` formatting) | done | `73c5dc7` |
 
-Two compromises carried forward:
-- `ruff format --check` covers `tests/` only; `src/` is `ruff check`-clean. Fix in WP1.1 by formatting
-  `src/` and widening the Makefile target.
+One compromise carried forward:
 - Vendor plugins are still **unverified** (`VERIFY` markers) and logfire reads a private SQL table.
   That is phase 3, behind docker/credentials.
 
+The phase-0 `src/` formatting compromise is closed: `make check` now formats both trees.
+Also closed: the replay-miss leak of tool args into `last_eval.json`/`data.tool_replay_misses`.
+New, documented consequence of WP1.1: a redacted cassette is lossy on reload (CONTRACT §5.1).
+
 ## 6. Phase 1 — do this next
 
-Full detail in `docs/IMPLEMENTATION_MAP.md` §2. Start with **WP1.1** (highest user risk: data
-currently persists unredacted), then 1.3, 1.2, 1.4, 1.5. They are independent enough to run 1.1 and
-1.3 in parallel (disjoint trees).
+Full detail in `docs/IMPLEMENTATION_MAP.md` §2. **WP1.1 (redaction) is done** (`73c5dc7`, CONTRACT
+§5.1). Start with **WP1.3** (statistics), then 1.2, 1.4, 1.5. 1.3 touches `gate.py`/`run.py` row
+identity, so do not run it beside anything else that edits those files.
 
-### WP1.1 — redaction (do first)
+### WP1.1 — redaction (DONE, `73c5dc7`)
 
-Currently traces, `rows.jsonl`, cassettes, ledger artifacts and `last_eval.json` store payloads
-verbatim (only length-clipped). A redaction hook is the gate for any real data.
+One rule set (`fields` globs → `patterns` → `hash` → `hook`) at exactly three outbound boundaries
+(ledger artifacts, `AgentTrace.to_dict`, `Cassette.save`), applied on deep copies after identity
+hashing; `evalops redact [--check]` is a read-only dry run; `EVALOPS_REDACT=strict|off`; strict
+verifies every buffered artifact before the first ledger write (exit 5, nothing persisted).
+Artifacts are staged, the manifest is written verbatim (a digest-matching rule cannot break it).
+The new config section is `redact:`; `docs/evalops.schema.json` is regenerated. 26 tests in
+`tests/unit/test_redact.py`, including a planted-secret sweep, strict atomicity, hypothesis
+idempotence, non-JSON normalization, manifest integrity and two-config isolation.
 
-Done-when:
-- `evalops.contract.redact` with ordered rules: field-path globs, regex patterns, `hash` mode, and a
-  callable hook; applied at exactly three outbound boundaries (ledger artifacts, `AgentTrace.to_dict`,
-  cassette save), **after** identity hashing.
-- `evalops redact --check` renders the diff it *would* apply without writing.
-- `EVALOPS_REDACT=strict|off`; strict refuses to persist unredacted payloads that match a rule.
-- Property test: a planted secret never reaches any sink; redaction is idempotent; `app_version` and
-  both fingerprints are unchanged by redaction.
-- Wire config: typed `redact:` section (pydantic model + regenerated schema).
-- Widen `ruff format --check` to `src/` in the same WP.
-
-### WP1.3 — statistics (can run in parallel with 1.1)
+### WP1.3 — statistics (NEXT; no parallel writer on `gate.py`/`run.py`)
 
 - One stdev convention (sample), Wilson + bootstrap CI, `pass^k` documented exactly, **stable row
   identity** (dataset fingerprint + row key, not the list index — reordering the dataset currently
@@ -177,5 +176,5 @@ gh run list --limit 1                 # confirm CI is green on main
 sed -n '/## 2. Work packages/,/## 3. Testing/p' docs/IMPLEMENTATION_MAP.md
 ```
 
-Then write the WP1.1 packet and dispatch `evalops-worker`; send the diff to `evalops-reviewer` at
-xhigh before committing.
+Then write the WP1.3 packet and dispatch `evalops-worker`; send the diff to `evalops-reviewer` at
+high before committing.

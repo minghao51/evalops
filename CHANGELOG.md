@@ -40,6 +40,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
   calibration with `float <= None` / `float(None)`).
 - `pydantic>=2,<3` is a core dependency (the core stays vendor-free, not dependency-free).
 
+### Added (WP1.1 — redaction)
+
+- `evalops.contract.redact`: one ordered rule set (field-path globs, regex patterns, `hash` mode, a
+  `module:attribute` hook) applied **after** identity hashing at exactly three outbound boundaries
+  — `run._put_artifact`, `AgentTrace.to_dict`, `Cassette.save` — on deep copies, so in-memory
+  identity (`app_version`, fingerprints, scorers, replay) is unchanged. Idempotent markers; non-JSON
+  values are normalized through the same `default=str` tree the sinks serialize.
+- Typed `redact:` config section (`mode: strict|off`, `fields`, `hash`, `patterns`, `hook`), regexes
+  compiled at validation (bad pattern = exit 2), and `EVALOPS_REDACT=strict|off` to override.
+- `strict` is a real write-path refusal (exit 5, nothing persisted): artifact bodies are buffered
+  and re-scanned before the first ledger write, so a late refusal leaves no partial run.
+- `evalops redact [--check]`: dry run over a run group's artifacts or `--file` inputs; renders the
+  would-be unified diff (or capped counts in `--json`), never writes, exits 0 even on differences
+  (the 0–7 exit matrix is frozen).
+- `evalops/manifest.json` is derived metadata written verbatim: a rule that matches a digest cannot
+  rewrite the hashes of the stored artifact bytes.
+- Replay-miss diagnostics are redacted at capture time, closing a leak of tool args into
+  `last_eval.json` and `data.tool_replay_misses` (CI logs).
+
+### Changed (WP1.1)
+
+- `ruff format --check` now covers `src/` as well as `tests/` (the phase-0 compromise); most of the
+  WP1.1 diff is mechanical formatting. `make fmt` formats both trees.
+- A `redacted` cassette is lossy by design: replay returns the redacted values and the reloaded
+  fingerprint differs exactly when redaction changed a semantic entry field (documented in
+  CONTRACT §5.1). Use `mode: off` or hash-only rules where record/replay identity must survive.
+- Configuration provenance and ledger params (e.g. `behavior_config`) are not a redaction boundary:
+  secrets must not live in `evalops.yaml`.
+
 ## [0.3.0] - baseline
 
 The inherited v0.3 codebase: five plugin roles, seven environments, agent trace normalization,

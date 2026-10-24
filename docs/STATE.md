@@ -1,14 +1,15 @@
 # evalops state board
 
-Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](IMPLEMENTATION_MAP.md)
+Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](IMPLEMENTATION_MAP.md)
 
 ## Where we are
 
-- **Phase:** 0 complete — G0 accepted, all WPs 0.0–0.6 done.
-- **Tests:** 125 green (`make check`), 17 at baseline. **CI:** py3.10/3.11/3.12 green on `main`
-  (run `40047473262`).
+- **Phase:** 1 in progress — WP1.1 (redaction) done; WP1.3 statistics next.
+- **Tests:** 151 green (`make check`), 17 at baseline. **CI:** py3.10/3.11/3.12 green on `main`
+  (last run before WP1.1: `40047803291`).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** phase 1 — WP1.1 redaction (blocker for real data), WP1.3 statistics in parallel.
+- **Next:** WP1.3 statistics (parallel-safe with nothing else touching `gate.py`), then 1.2 ledger
+  integrity, 1.4 test debt, 1.5 trace model v2.
 
 ## Work packages
 
@@ -21,16 +22,23 @@ Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 0.3 typed config (pydantic) + JSON schema | done | `f0da4ce` |
 | 0.5 envelope freeze + exit-code goldens | done | `7d7d8f1` |
 | 0.6 STATE/CHANGELOG + first real CI run | done | `022be67` + run `40047473262` |
+| 1.1 redaction (3 boundaries, strict, `redact --check`, src formatting) | done | `73c5dc7` (4 review rounds: 5 defects) |
 
 ## Known compromises (tracked, not forgotten)
 
-1. **`src/` is not format-enforced.** `make check` runs `ruff format --check tests` only; `src/` is
-   `ruff check`-clean. Remove the scope restriction in WP1.1 once `src/` is quiet.
-2. **Vendor plugins remain unverified.** Every `VERIFY` marker in `plugins/` is a phase 3 contract
+1. **Vendor plugins remain unverified.** Every `VERIFY` marker in `plugins/` is a phase 3 contract
    test, not a claim. The `logfire` usage lookup (private SQL) is the highest risk.
-3. **No redaction.** Traces, rows, cassettes and artifacts store payloads verbatim (length-clipped
-   only). WP1.1 is the fix; do not use evalops on real PII data before then.
-4. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
+2. **Redacted cassettes are lossy by design.** Replay returns redacted values and the reloaded
+   fingerprint differs exactly when a rule changed a semantic entry field (a `_meta`-provided
+   identity would be spoofable). Record/replay identity needs `mode: off` or hash-only rules.
+   See CONTRACT §5.1.
+3. **Redaction covers run payloads, not configuration.** Ledger params such as `behavior_config`
+   are unredacted on purpose (config is git-versioned provenance); secrets must not live in
+   `evalops.yaml` or a `behavior_config()` payload.
+4. **A backend write failure mid-artifact-loop can still leave a prefix.** The strict-refusal path
+   is atomic (all payloads verified before the first write); a `Ledger.put_artifact` failure after
+   the loop starts is not rolled back. WP1.2 (ledger integrity) owns that.
+5. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
    product (Deixic, Inc.). Import name stays `evalops`; distribution name is decided in WP6.1
    (`evalplane` and `agentgates` are free). See ADR 0001.
 
