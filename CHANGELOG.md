@@ -7,6 +7,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP2.3 presets (2026-10-24):** `evalops init --preset <p>` renders a validated `evalops.yaml`
+  for the 7 D8 presets (`local, mlflow, databricks, langfuse, langsmith, logfire, mixed`) —
+  vendor URLs/keys are `${VAR:-placeholder}` interpolations, never literals, the render goes through
+  the existing pydantic config models, and exactly one file is written (refusing an existing one
+  without `--force`). `evalops capabilities --json` and `make capabilities` generate
+  `docs/CAPABILITIES.md` from the plugin classes' own `provides` metadata and the preset table,
+  with a drift test so wiring docs cannot silently diverge from code. Doctor pins assert each
+  preset's real offline outcome.
 - `.env.example`: every environment variable evalops reads in one templated file — core
   (`EVALOPS_ENV`, `EVALOPS_ACTOR`, `EVALOPS_CONFIG`), the ledger URL override consumed by the
   shipped yaml's `${VAR:-default}` interpolation, the `EVALOPS_REDACT` safety override, the CI

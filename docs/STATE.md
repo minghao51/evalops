@@ -4,18 +4,22 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** **phase 2 in progress** — WP2.1 (`evalops pipeline`) done; next WP2.2 (release
-  re-verification, fork-PR locks, nightly baseline). Phase 1 is closed (G1).
-- **Tests:** 305 green (`make check`), 17 at baseline. **Postgres contract:** 1 passed with
-  `.[sql]` + docker. **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40079041204`,
-  G1 docs).
+- **Phase:** **phase 2 in progress** — WP2.1 (`evalops pipeline`) and WP2.3 (presets + init +
+  capability matrix) done; remaining: WP2.2 (release re-verification, fork-PR locks, nightly
+  baseline), WP2.4 (CI adapters), WP2.5 (calibration enforcement), then G2 (tag v0.4.0).
+  Phase 1 is closed (G1).
+- **Tests:** 321 green (`make check`), 17 at baseline. **Postgres contract:** 1 passed with
+  `.[sql]` + docker. **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40089721659`,
+  WP2.3).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
   compatibility; `make check` 283, standalone 283/283, `make schema` zero drift, goldens untouched;
   Postgres contract 1 passed (`.[sql]`, docker). CI run `40078618397`.
-- **Next:** write the WP2.2 packet from the map's phase-2 row and dispatch it; the packet shape is
-  `docs/packets/WP2.1.md`. Contract suite: `make contract` with `evalops[sql]` installed.
+- **Next:** WP2.2 (release re-verification) and WP2.5 (calibration enforcement) are the open
+  phase-2 WPs that touch the pipeline; WP2.4 (CI adapters) builds on `evalops pipeline`. Packet
+  shape: `docs/packets/WP2.1.md` / `WP2.3.md`. Contract suite: `make contract` with `evalops[sql]`
+  installed.
 
 ## Work packages
 
@@ -33,6 +37,8 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` (2 review rounds: PG race, dialect dispatch) |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` (1 review round: PASS, 0 defects; 1 bug fix: `traces` usage exit) |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round: PASS, 0 defects + 1 narrow re-review) |
+| 2.1 `evalops pipeline <stage>` (stage table, dry-run, idempotence, bash shim) | done | `135bf0e` + exec-bit fix `b670d7b` (narrow re-review PASS) |
+| 2.3 presets (`init --preset` ×7) + `evalops capabilities` + generated `docs/CAPABILITIES.md` | done | `684c629` (1 review round: PASS, 0 defects) |
 | **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
 | 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds; 19 → 22 pipeline tests) |
 

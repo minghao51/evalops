@@ -1,10 +1,11 @@
-# HANDOFF: evalops — phase 2 in progress (WP2.1 done; WP2.2 next)
+# HANDOFF: evalops — phase 2 in progress (WP2.1 + WP2.3 done; WP2.2/2.4/2.5 remain)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **305 offline + 1 Postgres contract test, deselected**).
+(tests: **321 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 is at WP2.2. The
-completed `docs/packets/WP2.1.md` is the packet template.
+`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 has WP2.2 (release
+re-verification), WP2.4 (CI adapters) and WP2.5 (calibration enforcement) open. The completed
+`docs/packets/WP2.1.md` / `WP2.3.md` are the packet templates.
 
 ---
 
@@ -122,7 +123,8 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | WP1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round PASS + 1 narrow re-review) |
-| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds) |
+| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds) + exec-bit fix `b670d7b` |
+| 2.3 presets (`init --preset` ×7, capability matrix from code, generated `docs/CAPABILITIES.md`) | done | `684c629` (1 review round: PASS, 0 defects) |
 
 **G1 closed** (2026-10-24): 283 tests, standalone 283/283, Postgres contract 1 passed, `make schema`
 zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
