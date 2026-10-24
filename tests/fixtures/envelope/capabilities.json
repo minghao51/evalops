@@ -1,0 +1,226 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "capabilities",
+  "env": "local",
+  "data": {
+    "presets": {
+      "local": {
+        "description": "zero external services: prompts/datasets are repo files and the ledger is SQLite",
+        "environments": [
+          "local"
+        ],
+        "extras": [],
+        "roles": {
+          "prompts": "git",
+          "datasets": "git",
+          "ledger": "sql",
+          "tracer": "none",
+          "evaluator": "core"
+        }
+      },
+      "mlflow": {
+        "description": "one self-hosted MLflow server serves all five roles (tracking server + genai registry)",
+        "environments": [
+          "local",
+          "mlflow"
+        ],
+        "extras": [
+          "mlflow"
+        ],
+        "roles": {
+          "prompts": "mlflow",
+          "datasets": "mlflow",
+          "ledger": "mlflow",
+          "tracer": "mlflow",
+          "evaluator": "mlflow"
+        }
+      },
+      "databricks": {
+        "description": "MLflow on a Databricks workspace: Unity Catalog prompts, datasets and run ledger",
+        "environments": [
+          "databricks",
+          "local"
+        ],
+        "extras": [
+          "databricks"
+        ],
+        "roles": {
+          "prompts": "mlflow",
+          "datasets": "mlflow",
+          "ledger": "mlflow",
+          "tracer": "mlflow",
+          "evaluator": "mlflow"
+        }
+      },
+      "langfuse": {
+        "description": "Langfuse prompts, datasets, tracing and native evaluation; SQL run ledger",
+        "environments": [
+          "langfuse",
+          "local"
+        ],
+        "extras": [
+          "langfuse"
+        ],
+        "roles": {
+          "prompts": "langfuse",
+          "datasets": "langfuse",
+          "ledger": "sql",
+          "tracer": "langfuse",
+          "evaluator": "langfuse"
+        }
+      },
+      "langsmith": {
+        "description": "LangSmith prompts, datasets, tracing and native evaluation; SQL run ledger",
+        "environments": [
+          "langsmith",
+          "local"
+        ],
+        "extras": [
+          "langsmith"
+        ],
+        "roles": {
+          "prompts": "langsmith",
+          "datasets": "langsmith",
+          "ledger": "sql",
+          "tracer": "langsmith",
+          "evaluator": "langsmith"
+        }
+      },
+      "logfire": {
+        "description": "Logfire traces every row; prompts/datasets stay in git and the core evaluator runs the eval",
+        "environments": [
+          "local",
+          "logfire"
+        ],
+        "extras": [
+          "logfire"
+        ],
+        "roles": {
+          "prompts": "git",
+          "datasets": "git",
+          "ledger": "sql",
+          "tracer": "logfire",
+          "evaluator": "core"
+        }
+      },
+      "mixed": {
+        "description": "roles compose: git prompts/datasets, SQL ledger, Logfire traces, core evaluator",
+        "environments": [
+          "local",
+          "mixed"
+        ],
+        "extras": [
+          "logfire"
+        ],
+        "roles": {
+          "prompts": "git",
+          "datasets": "git",
+          "ledger": "sql",
+          "tracer": "logfire",
+          "evaluator": "core"
+        }
+      }
+    },
+    "plugins": {
+      "core": {
+        "aliases": [
+          "none"
+        ],
+        "extra": null,
+        "provides": [
+          "tracer",
+          "evaluator"
+        ]
+      },
+      "git": {
+        "aliases": [],
+        "extra": null,
+        "provides": [
+          "prompts",
+          "datasets"
+        ]
+      },
+      "langfuse": {
+        "aliases": [],
+        "extra": "langfuse",
+        "provides": [
+          "prompts",
+          "datasets",
+          "tracer",
+          "evaluator"
+        ]
+      },
+      "langsmith": {
+        "aliases": [],
+        "extra": "langsmith",
+        "provides": [
+          "prompts",
+          "datasets",
+          "tracer",
+          "evaluator"
+        ]
+      },
+      "logfire": {
+        "aliases": [],
+        "extra": "logfire",
+        "provides": [
+          "tracer"
+        ]
+      },
+      "mlflow": {
+        "aliases": [],
+        "extra": "mlflow",
+        "provides": [
+          "prompts",
+          "datasets",
+          "ledger",
+          "tracer",
+          "evaluator"
+        ]
+      },
+      "sql": {
+        "aliases": [],
+        "extra": null,
+        "provides": [
+          "ledger"
+        ]
+      }
+    },
+    "roles": {
+      "prompts": [
+        "git",
+        "langfuse",
+        "langsmith",
+        "mlflow"
+      ],
+      "datasets": [
+        "git",
+        "langfuse",
+        "langsmith",
+        "mlflow"
+      ],
+      "ledger": [
+        "mlflow",
+        "sql"
+      ],
+      "tracer": [
+        "core",
+        "langfuse",
+        "langsmith",
+        "logfire",
+        "mlflow",
+        "none"
+      ],
+      "evaluator": [
+        "core",
+        "langfuse",
+        "langsmith",
+        "mlflow",
+        "none"
+      ]
+    }
+  },
+  "errors": []
+}

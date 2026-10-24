@@ -7,7 +7,7 @@ STAGE   ?= dev
 PYTHON  ?= $(shell command -v .venv/bin/python || echo python3)
 
 .PHONY: check test test-unit test-integration test-standalone lint fmt typecheck contract clean \
-        plugins doctor guard sync plan eval gate cost schema
+        plugins doctor guard sync plan eval gate cost schema capabilities
 
 # ---- dev loop: offline, no docker, no network ---------------------------------
 check: lint typecheck test
@@ -31,6 +31,10 @@ typecheck: ; $(PYTHON) -m mypy
 # Regenerate the committed JSON Schema of evalops.yaml (drift-tested by tests/unit/test_config_models.py).
 schema:
 	PYTHONPATH=src $(PYTHON) -c "from evalops.config.schema import write_schema; print(write_schema())"
+
+# Regenerate the generated capability matrix (drift-tested by tests/unit/test_presets.py).
+capabilities:
+	PYTHONPATH=src $(PYTHON) -c "from evalops.presets import write_capabilities; print(write_capabilities())"
 
 # Vendor contract tests need docker-local services; skip cleanly when unavailable.
 contract:

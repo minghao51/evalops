@@ -57,8 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("plugins", help="show configured plugins per role and all available plugins")
+    sub.add_parser("capabilities", help="the preset/plugin capability matrix, generated from code")
     sub.add_parser("doctor", help="instantiate every configured plugin and check connectivity")
     sub.add_parser("guard", help="static checks: no bypass of versioning, locks present, frozen data intact")
+
+    ini = sub.add_parser("init", help="write a starter evalops.yaml for one of the built-in presets")
+    ini.add_argument("--preset", required=True, choices=list(_preset_names()), help="which preset to render")
+    ini.add_argument("--force", action="store_true", help="overwrite an existing evalops.yaml")
+    ini.add_argument("--dir", default=".", metavar="PATH", help="directory to write evalops.yaml into (default: cwd)")
 
     pl = sub.add_parser("pipeline", help="run one CI stage: guard, sync, eval, gate, promote, state commit")
     pl.add_argument("stage", choices=list(_pipeline_stages()))
@@ -273,6 +279,10 @@ def main(argv=None) -> int:
         env = _early_env(argv, e)
         return _finish(envelope.from_error(_command_from_argv(parser, argv), env, e), JSON_FLAG in argv)
     command = args.cmd
+    if command in ("init", "capabilities"):
+        # `init` writes evalops.yaml (there may be none yet) and `capabilities` is static data, so
+        # both answer before the config loads -- like `--version`, and with the same resolved `env`.
+        return _finish(_static_envelope(args, argv), args.json)
     try:
         cfg = config_mod.load(args.config)
     except Exception as e:  # noqa: BLE001 - a broken config must still produce a valid envelope
@@ -382,11 +392,35 @@ def _forward_to_stderr(text: str) -> None:
     sys.stderr.flush()
 
 
+def _static_envelope(args, argv: list[str]) -> dict[str, Any]:
+    """Envelope for the commands that never read ``evalops.yaml`` (``init``, ``capabilities``)."""
+    from . import presets
+
+    env = _early_env(argv)
+    try:
+        if args.cmd == "init":
+            data = presets.init(args.preset, directory=args.dir, force=args.force)
+        else:
+            data = presets.capabilities_payload()
+    except EvalOpsError as exc:
+        return envelope.from_error(args.cmd, env, exc)
+    except Exception as exc:  # noqa: BLE001 - an unexpected failure is still an envelope
+        return envelope.failure(args.cmd, env, envelope.EXIT_RUNTIME, f"{type(exc).__name__}: {exc}")
+    return envelope.success(args.cmd, env, data)
+
+
 def _pipeline_stages() -> tuple[str, ...]:
     """The stage names `pipeline` accepts (one source of truth: the pipeline module's table)."""
     from .pipeline import STAGES
 
     return STAGES
+
+
+def _preset_names() -> tuple[str, ...]:
+    """The preset names ``init --preset`` accepts (one source of truth: ``presets.PRESETS``)."""
+    from .presets import PRESET_NAMES
+
+    return PRESET_NAMES
 
 
 def _subcommand_names(parser: argparse.ArgumentParser) -> set[str]:
