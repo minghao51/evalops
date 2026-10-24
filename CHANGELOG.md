@@ -69,6 +69,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 - Configuration provenance and ledger params (e.g. `behavior_config`) are not a redaction boundary:
   secrets must not live in `evalops.yaml`.
 
+### Added (WP1.3 — statistics)
+
+- One dispersion convention: sample standard deviation (`statistics.stdev`) under the existing
+  `std` key; no gate rule depends on it. `min_ci_lower` keeps its normal-approximation meaning.
+- `gate.wilson_interval` for proportions and a deterministic `gate.bootstrap_ci` (percentile of the
+  mean, fixed seed). New optional rules: `gates.metrics.<m>.min_ci_lower_bootstrap` and
+  `gates.reliability.min_pass_hat_k_wilson` (additive config keys, schema regenerated).
+- `pass^k` documented exactly: plug-in estimator over all k repeats per case, k = minimum repeat
+  count, repeats ordered by `evalops.repeat` as integers. `unordered_repeats`,
+  `cases_with_fewer_repeats` and `comparable` flag input that cannot support the estimate.
+- Stable row identity: `datasets.row_key` hashes `{inputs, expectations}` (duplicates get a
+  deterministic `#n`), `RowResult.row_key` is additive, `rows.jsonl` carries it, and the gate aligns
+  on it (`aligned_by: "row_key"`) instead of the list index; v0 rows fall back to `row_id`.
+  No identity hash changes.
+- Baseline pinned by group + hash: `promote --alias production` tags the baseline with
+  `evalops.baseline.app_version` and `evalops.baseline.dataset_fingerprint`; the gate reports the
+  pin and fails on a moved baseline or a candidate evaluated on a different dataset fingerprint.
+- Drift: per metric `delta`, `pct_change`, Cohen's d, `z` and a two-sided `p` (erfc), plus paired
+  drift by row key with a bootstrap CI. Additive: no existing check outcome changes.
+- Change attribution: differing `app_version`/`config_hash`/`git_sha`/dataset/tool/prompt/judge/
+  plugin params are named in `gate_report.md` and `data.attribution`; `behavior_config` excluded.
+
 ## [0.3.0] - baseline
 
 The inherited v0.3 codebase: five plugin roles, seven environments, agent trace normalization,
