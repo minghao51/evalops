@@ -127,6 +127,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
   `UniqueViolation` (exit 5); the upsert is now dialect-dispatched (`ON CONFLICT DO UPDATE` on
   SQLite/Postgres, `ON DUPLICATE KEY UPDATE` on MySQL/MariaDB, exit 6 for unverified dialects).
 
+### Added (WP1.5 — trace model v2)
+
+- The normalized agent trace is now a separately versioned document nested in each
+  `evalops/rows.jsonl` line: `TRACE_SCHEMA_VERSION = 2`. Writers always emit 2 (`AgentTrace.to_dict`
+  upgrades a document read as v1); readers accept an absent version as v1 and explicit 1–2; any
+  other value is `FormatError` → exit 7 naming the artifact (`evalops/rows.jsonl`, or
+  `dataset:<name>` on the calibration path). Unknown top-level and span keys are ignored.
+  `FORMAT_VERSION` (the rows line) is unchanged. A v1 rows artifact still gates with the same
+  checks as v2; `row_key` and `app_version` do not move.
+- Unmodeled span attributes are reported, never silently dropped: `Span.unknown_attributes` holds
+  sorted, deduplicated **names** only (values may be secrets) for raw attributes `normalize()` did
+  not consume; `AgentTrace.unknown_attributes()` aggregates `{name: span_count}`. The additive
+  surface is `evalops traces --unknown-attrs`; the default `traces` payload and its envelope golden
+  are byte-identical.
+- `evalops.traces.capture.BREAKER_PARITY` documents the four capture paths
+  (`langchain=enforced`, `otel=post-hoc`, `openai_agents=post-hoc`, `custom=cooperative`) and
+  `docs/AGENT_TRACES.md` mirrors it with the framework hard stop to set alongside. Regression tests
+  cover each path, including async-only `row_limits.max_seconds` (a `TimeoutError`, never relabelled
+  `budget_exceeded`); no fake abort was added to the OTel/OpenAI paths.
+- `tests/fixtures/traces/rows_v1.jsonl` + `rows_v2.jsonl` pin the legacy and versioned shapes and
+  the v1/v2 gate equivalence. `docs/CONTRACT.md` §5.6 scopes the identity claim honestly: the trace
+  version never enters `app_version` or `row_key`, a trace-less dataset fingerprint is unchanged,
+  and a dataset source record that embeds a trace document is fingerprinted verbatim (new snapshot
+  by design).
+
+### Changed (WP1.5)
+
+- The `evalops traces` command accepts `--unknown-attrs`; without it, nothing changes. The trace
+  document gains additive fields (`schema_version`, per-span `unknown_attributes`), so a v1 reader
+  sees the same rows line and a v2 reader sees the new metadata.
+
 ## [0.3.0] - baseline
 
 The inherited v0.3 codebase: five plugin roles, seven environments, agent trace normalization,

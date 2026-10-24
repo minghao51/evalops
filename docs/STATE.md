@@ -4,13 +4,14 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 1 nearly done — WP1.1 (redaction), WP1.3 (statistics), WP1.2 (ledger integrity) and
-  WP1.4 (test debt) done; next WP1.5 trace model v2, then the G1 checklist.
-- **Tests:** 246 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
-  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40068844584`, WP1.4).
+- **Phase:** 1 WPs complete — WP1.1 (redaction), WP1.3 (statistics), WP1.2 (ledger integrity),
+  WP1.4 (test debt) and WP1.5 (trace model v2) done; next the G1 checklist, then phase 2.
+- **Tests:** 283 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
+  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40069033269`, WP1.4 docs).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** write the WP1.5 packet from HANDOFF §6 (trace model v2 + capture hardening) and dispatch
-  it; then run the map's G1 checklist. Postgres contract suite: `make contract` with `evalops[sql]
+- **Next:** run the map's G1 checklist (redaction proven, formats verified, statistics
+  property-tested, every exit path tested, trace v1/v2 compatibility) and update this board; then
+  phase 2 WP2.1 (`evalops pipeline`). Postgres contract suite: `make contract` with `evalops[sql]`
   installed.
 
 ## Work packages
@@ -28,6 +29,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` (1 review round: PASS, 1 cleanup) |
 | 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` (2 review rounds: PG race, dialect dispatch) |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` (1 review round: PASS, 0 defects; 1 bug fix: `traces` usage exit) |
+| 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round: PASS, 0 defects + 1 narrow re-review) |
 
 ## Known compromises (tracked, not forgotten)
 
