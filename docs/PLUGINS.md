@@ -15,7 +15,7 @@ evalops splits the work into five **roles**. Each role is served by one plugin, 
 | Plugin | prompts | datasets | ledger | tracer | evaluator | Install extra | Status |
 |---|---|---|---|---|---|---|---|
 | `git` | ✓ (files + aliases.json in repo) | ✓ (jsonl snapshots) | | | | none | tested e2e |
-| `sql` | | | ✓ (SQLite stdlib; Postgres/MySQL via SQLAlchemy) | | | `sql` for non-SQLite | tested e2e |
+| `sql` | | | ✓ (SQLite stdlib; Postgres verified; MySQL via SQLAlchemy, budget reservation untested) | | | `sql` for non-SQLite | tested e2e on SQLite; contract-tested on Postgres |
 | `core` / `none` | | | | ✓ (no-op) | ✓ (runner with retries, rate limit, async) | none | tested e2e |
 | `mlflow` | ✓ | ✓ | ✓ | ✓ | ✓ native `mlflow.genai.evaluate` | `mlflow` / `databricks` | written to MLflow 3.x docs, not run here |
 | `langfuse` | ✓ (labels) | ✓ | — | ✓ | ✓ native `run_experiment` | `langfuse` | written to current SDK docs, not run here |

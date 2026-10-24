@@ -44,6 +44,11 @@ Rules:
 4. `7` is raised when reading, never when writing: writers always emit `FORMAT_VERSION`.
 5. New codes may only be added by a new ADR; existing meanings are append-only.
 6. `argparse` usage errors are normalized to `2`; `--help` and `--version` are `0`.
+7. Ledger integrity commands (WP1.2) reuse this matrix without adding a code: `evalops ledger migrate`
+   is `0`; a clean `evalops ledger verify` is `0`, while a report with integrity problems is `5`
+   (its `errors[0].message` names the problem count and `data.problems` carries the typed findings);
+   a ledger plugin without schema support is `6` (`CapabilityError`); a recorded ledger table schema
+   newer than this evalops understands is `7` (`FormatError`, on both `migrate` and `verify`).
 
 The mapping is asserted, one case per code `0`–`7`, by
 `tests/unit/test_envelope.py::test_exit_code_matrix_zero_to_seven`, which checks the process exit
@@ -254,6 +259,38 @@ Invariants:
 - `start_run`/`end_run`/`log` never delete or rewrite a completed run. Baselines are selected by
   tags (`evalops.baseline=true`), so tag semantics are part of the contract.
 
+#### 3.3.1 Budget reservation lifecycle (WP1.2)
+
+The budget hooks (`budget_reserve/settle/release/reserved`, added in WP1.2) are an **optional**
+ledger capability with an explicit lifecycle:
+
+- **Atomic accounting is a SQL-ledger capability; non-SQL ledgers are advisory-only.** The `Ledger`
+  defaults track nothing: `budget_reserve` returns `True`, `budget_settle`/`budget_release` are
+  no-ops, and `budget_reserved` returns `0.0`. A caller (or a test) must not read a successful
+  reserve on such a ledger as a tracked reservation, and must not expect a refusal (exit 3) from it.
+- **A concurrent first reserve in a month with no row either reserves or refuses with exit 3; it
+  never fails with a backend constraint error.** The SQL ledger creates the month row and applies the
+  delta in one upsert statement (`reserved_usd`/`settled_usd` re-add the delta, not "do nothing"), so
+  N racing first reservations of a fresh month all count. The spelling is dialect-specific: SQLite
+  and Postgres use `INSERT ... ON CONFLICT (month) DO UPDATE`, MySQL/MariaDB use
+  `INSERT ... ON DUPLICATE KEY UPDATE reserved_usd = reserved_usd + :r, settled_usd = settled_usd + :s`
+  (the same re-apply-the-delta shape; MySQL 8.0.20+ deprecates `VALUES(col)`). **MySQL/MariaDB budget
+  reservation is untested** in this repo: there is no MySQL contract service, and Postgres is the
+  verified non-SQLite backend. The other ledger roles (runs, kv, artifacts, `migrate`, `verify`) use
+  portable SQL and are unaffected. Any other dialect raises `CapabilityError` (exit 6) once, before
+  the first budget write; the SQL ledger never guesses a dialect's upsert spelling.
+- **A run that crashes between reserve and settle leaves its reservation counted** against that UTC
+  month until it is released. The ledger stays self-consistent, so `evalops ledger verify` does not
+  flag it, and there is no CLI repair command yet: release the reservation (or correct the amount)
+  with a manual SQL update on `evalops_budget` and `evalops_budget_month` together — changing only
+  one of them is exactly the `budget_mismatch` that `verify` reports — until a future `evalops ledger
+  release` lands.
+- **`evalops ledger migrate` is the intended first step.** A database with no
+  `evalops_meta(key='schema_version')` row is schema version 0, which covers both a fresh and a
+  legacy pre-WP1.2 database. `verify` checks whatever tables exist and reports `schema_version: 0`;
+  the budget tables are also created lazily by the first budget operation *without* stamping the
+  version, so `migrate` still reports step 1 as pending on such a database.
+
 ### 3.4 `Tracer`
 
 ```python
@@ -332,6 +369,12 @@ Versioned artifacts:
 
 Ledger **params/tags** (not files) record `evalops_version` and `format_version` on each run for
 diagnosis; they are additive and never used for compatibility decisions.
+
+The **ledger table schema** has its own version, separate from `FORMAT_VERSION` and from the
+artifact versions above: `LEDGER_SCHEMA_VERSION` in `src/evalops/plugins/sql.py`, recorded in
+`evalops_meta(key='schema_version')` (a database with no row is version 0). `evalops ledger migrate`
+applies pending steps idempotently and preserves rows; a recorded version greater than the reader's
+is the same hard stop as a future artifact version (exit 7), never a silent downgrade.
 
 Policy:
 

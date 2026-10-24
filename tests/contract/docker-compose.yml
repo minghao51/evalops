@@ -1,0 +1,16 @@
+# WP1.2 Postgres contract backend. `make contract` starts it automatically when no
+# EVALOPS_TEST_POSTGRES_URL is set, and skips cleanly when docker or the driver is unavailable.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: evalops
+      POSTGRES_PASSWORD: evalops
+      POSTGRES_DB: evalops_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evalops -d evalops_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

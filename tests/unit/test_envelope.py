@@ -185,6 +185,16 @@ def build_predict_fn(prompts):
 """
 NOISY_CONFIG = CONFIG.replace("predict_fn: fake_app:build_predict_fn", "predict_fn: noisy_app:build_predict_fn")
 
+# WP1.2: a ledger plugin that keeps the non-abstract port defaults (`migrate`/`verify` raise
+# CapabilityError), so `ledger verify` pins the exit-6 mapping without adding a new exit code.
+MEMORY_LEDGER = (TESTS_DIR / "fixtures" / "formats" / "memory_ledger.py").read_text()
+LEDGER_CONFIG = """
+project: envelope-ledger
+default_env: local
+plugins: {prompts: git, datasets: git, ledger: "memory_ledger:MemoryLedger", tracer: none, evaluator: core}
+app: {predict_fn: fake_app:build_predict_fn}
+"""
+
 # D1: two ways a hook bypasses `sys.stdout` -- writing to the interpreter's real stdout object and
 # spawning a child that inherits file descriptor 1. `contextlib.redirect_stdout` catches neither, so
 # the capture has to be at the descriptor level. Both texts must land on stderr, in order.
@@ -534,6 +544,7 @@ GOLDEN_NAMES = (
     "gate_pass",
     "gate_failure",
     "sync_check_failure",
+    "ledger_verify",
     "redact",
 )
 
@@ -553,6 +564,8 @@ def _golden_project() -> pathlib.Path:
             "broken_config.yaml": BROKEN_CONFIG,
             "redact_config.yaml": REDACT_CONFIG,
             "secrets.json": SECRETS_JSON,
+            "ledger_config.yaml": LEDGER_CONFIG,
+            "memory_ledger.py": MEMORY_LEDGER,
         },
     )
 
@@ -589,6 +602,8 @@ def _golden_envelopes(root: pathlib.Path) -> dict[str, tuple[int, dict]]:
     prompt = root / "prompts" / "support_system.txt"
     prompt.write_text(prompt.read_text() + "\nAlways be extra polite.\n")
     run("sync_check_failure", "sync", "prompts", "--check")
+    # WP1.2: a read-only capability error; it cannot disturb any earlier golden.
+    run("ledger_verify", "--config", "ledger_config.yaml", "ledger", "verify")
     # WP1.1: read-only, so it cannot disturb any earlier golden; it is deliberately last.
     run("redact", "--config", "redact_config.yaml", "redact", "--check", "--file", "secrets.json")
     return out

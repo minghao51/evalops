@@ -11,6 +11,7 @@ Judge cost is estimated from configured per-call token sizes; reconcile against 
 
 import datetime as dt
 import json
+import time
 
 from .contract import formats
 from .util import EXIT_BUDGET, EXIT_RUNTIME, EvalOpsError
@@ -152,8 +153,22 @@ def estimate(cfg, rows, repeats, llm_judges, judge_only, hist) -> dict:
     }
 
 
+def _now_ms() -> int:
+    """Wall clock in epoch milliseconds; a test seam for the UTC month boundary."""
+    return int(time.time() * 1000)
+
+
+def utc_month(ms: int) -> str:
+    """The UTC calendar month of `ms` as ``YYYY-MM`` (budgets never use local time)."""
+    return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m")
+
+
 def month_spend(ledger) -> float:
-    start = dt.datetime.now(dt.timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    """Spend so far in the current **UTC** month, from the runs' recorded total cost."""
+    now_ms = _now_ms()
+    start = dt.datetime.fromtimestamp(now_ms / 1000, dt.timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
     runs = ledger.find_runs(since_ms=int(start.timestamp() * 1000))
     return round(sum(r.metrics.get("total_cost_usd", 0.0) for r in runs), 4)
 
@@ -161,6 +176,9 @@ def month_spend(ledger) -> float:
 def check_budget(cfg, ledger, est, override) -> dict:
     budgets = cfg.section("cost").get("budgets", {})
     spent = month_spend(ledger)
+    # Outstanding reservations are money already promised to a concurrent run; include them so two
+    # evals cannot both pass the same month projection (non-SQL ledgers default to 0.0).
+    reserved = ledger.budget_reserved(utc_month(_now_ms()))
     info = {
         "estimate_usd": est["total_usd"],
         "per_run_usd": budgets.get("per_run_usd"),
@@ -171,7 +189,9 @@ def check_budget(cfg, ledger, est, override) -> dict:
     problems = []
     if budgets.get("per_run_usd") is not None and est["total_usd"] > float(budgets["per_run_usd"]):
         problems.append("estimate exceeds per_run_usd")
-    if budgets.get("per_month_usd") is not None and spent + est["total_usd"] > float(budgets["per_month_usd"]):
+    if budgets.get("per_month_usd") is not None and spent + reserved + est["total_usd"] > float(
+        budgets["per_month_usd"]
+    ):
         problems.append("estimate would exceed per_month_usd")
     info["problems"] = problems
     if problems and not override:

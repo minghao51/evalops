@@ -145,6 +145,39 @@ class Ledger(ABC):
     ) -> list[RunRecord]:
         """Runs whose tags match all given key/values, newest first."""
 
+    # Additive ledger-integrity capability. Non-SQL ledgers are advisory-only: the defaults below
+    # keep every existing/third-party plugin working unchanged, and `migrate`/`verify` report that
+    # the backend cannot manage a table schema (exit 6) instead of pretending it did.
+    def migrate(self) -> dict:
+        """Apply pending ledger schema steps; unsupported ledgers raise CapabilityError (exit 6)."""
+        raise CapabilityError(
+            getattr(self, "name", type(self).__name__),
+            "ledger migrate",
+            "Only SQL-backed ledgers have a table schema to migrate.",
+        )
+
+    def verify(self) -> dict:
+        """Read-only ledger integrity report; unsupported ledgers raise CapabilityError (exit 6)."""
+        raise CapabilityError(
+            getattr(self, "name", type(self).__name__),
+            "ledger verify",
+            "Only SQL-backed ledgers can verify their tables.",
+        )
+
+    def budget_reserve(self, run_id: str, amount_usd: float, month: str, limit_usd: float | None) -> bool:
+        """Reserve an estimate for `run_id` (advisory default: nothing is tracked, always True)."""
+        return True
+
+    def budget_settle(self, run_id: str, actual_usd: float) -> None:
+        """Move a reservation to its actual cost (advisory default: no-op)."""
+
+    def budget_release(self, run_id: str) -> None:
+        """Release an unused reservation (advisory default: no-op)."""
+
+    def budget_reserved(self, month: str) -> float:
+        """Outstanding reserved (not settled) USD for a UTC `YYYY-MM` month (default: 0.0)."""
+        return 0.0
+
 
 class Tracer(ABC):
     @abstractmethod

@@ -16,7 +16,7 @@ databricks = ["mlflow[databricks]>=3.2,<4"]
 langfuse = ["langfuse>=3"]
 langsmith = ["langsmith>=0.3", "langchain-core>=0.3"]
 logfire = ["logfire>=3"]
-sql = ["sqlalchemy>=2"]               # only for non-SQLite ledgers (Postgres, MySQL, ...)
+sql = ["sqlalchemy>=2", "psycopg[binary]>=3"]  # only for non-SQLite ledgers (Postgres, MySQL, ...)
 otel = ["opentelemetry-sdk>=1.27"]    # trace capture for OTel-instrumented frameworks
 langgraph = ["langchain-core>=0.3"]   # native LangChain/LangGraph callback capture
 # OpenInference instrumentors are installed per framework, e.g.

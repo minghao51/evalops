@@ -1,5 +1,6 @@
 """The only way evaluations run: pinned versions, budget-checked, cost-measured, traces captured."""
 
+import contextlib
 import dataclasses
 import functools
 import inspect
@@ -18,7 +19,17 @@ from .registry import Registry
 from .scoring import aggregate_rows, call_scorer, scorer_name, wants_trace
 from .traces import capture as trace_capture
 from .traces.model import AgentTrace
-from .util import EXIT_GUARD, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError, canonical, git_dirty, git_sha, sha256
+from .util import (
+    EXIT_BUDGET,
+    EXIT_GUARD,
+    EXIT_RUNTIME,
+    EXIT_USAGE,
+    EvalOpsError,
+    canonical,
+    git_dirty,
+    git_sha,
+    sha256,
+)
 
 STAGES = ("dev", "pr", "main", "nightly", "control")
 TOOL_MODES = ("live", "record", "replay")
@@ -299,7 +310,26 @@ def _evaluate(
         status = "FAILED"
         artifacts: dict[str, str] = {}
         pending: list[tuple[str, str]] = []
+        month = cost.utc_month(cost._now_ms())
+        month_cap = cfg.section("cost").get("budgets", {}).get("per_month_usd")
+        month_limit = float(month_cap) if month_cap is not None else None
+        run_estimate = est["total_usd"] / max(reps, 1)
+        reserved = False
         try:
+            if not ledger.budget_reserve(run_id, run_estimate, month, month_limit):
+                info = {
+                    "month": month,
+                    "reserved_usd": ledger.budget_reserved(month),
+                    "limit_usd": month_limit,
+                    "estimate_usd": est["total_usd"],
+                    "run_estimate_usd": run_estimate,
+                }
+                raise EvalOpsError(
+                    f"budget exceeded: monthly reservation for {month} would exceed per_month_usd {month_limit}",
+                    EXIT_BUDGET,
+                    info,
+                )
+            reserved = True
             ledger.log(
                 run_id,
                 params={
@@ -402,6 +432,8 @@ def _evaluate(
                     **({"evalops.native_ref": result.native_ref} if result.native_ref else {}),
                 },
             )
+            ledger.budget_settle(run_id, total)
+            reserved = False
             runs.append(
                 {
                     "run_id": run_id,
@@ -413,6 +445,9 @@ def _evaluate(
             )
             status = "FINISHED"
         finally:
+            if reserved:
+                with contextlib.suppress(Exception):  # release must never mask the run's original failure
+                    ledger.budget_release(run_id)
             ledger.end_run(run_id, status)
 
     actual = round(sum(r["metrics"]["total_cost_usd"] for r in runs), 4)

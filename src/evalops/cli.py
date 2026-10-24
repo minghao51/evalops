@@ -15,14 +15,22 @@ import os
 import sys
 import tempfile
 from collections.abc import Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from . import __version__, config as config_mod
 from . import envelope
-from .util import EXIT_OK, EXIT_USAGE, EvalOpsError
+from .util import EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError
 
 JSON_FLAG = "--json"
 VERSION_FLAG = "--version"
+
+
+class _ReportError(EvalOpsError):
+    """A failure that also carries a structured report into the envelope's ``data``."""
+
+    def __init__(self, message: str, code: int, details: dict[str, Any], data: dict[str, Any]):
+        super().__init__(message, code, details)
+        self.data = data
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -104,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
     cfsub.add_parser("schema", help="print the generated JSON Schema of evalops.yaml")
     cfsub.add_parser("explain", help="resolved configuration with per-key provenance")
 
+    lg = sub.add_parser("ledger", help="apply or verify the SQL ledger's table schema")
+    lgsub = lg.add_subparsers(dest="ledger_action", required=True)
+    lgsub.add_parser("migrate", help="apply pending ledger schema steps (idempotent, preserves rows)")
+    lgsub.add_parser("verify", help="read-only integrity report: orphans, manifest hashes, budget totals")
+
     rd = sub.add_parser("redact", help="dry-run the redaction rules: reports only, never writes")
     rd.add_argument(
         "--check",
@@ -119,11 +132,31 @@ def dispatch(args, cfg) -> dict:
     from . import cost, gate, guard, run
     from . import datasets as ds_mod
     from . import prompts as pr_mod
-    from .ports import ROLES
+    from .ports import ROLES, Ledger
     from .registry import Registry, available
 
     if args.cmd == "config":
         return config_mod.run_config_command(cfg, args.config_action)
+    if args.cmd == "ledger":
+        ledger = cast(Ledger, Registry(cfg).get("ledger"))
+        if args.ledger_action == "migrate":
+            result = ledger.migrate()
+            applied = result.get("applied") or []
+            return {
+                "summary": f"ledger schema {result.get('from')} -> {result.get('to')} (applied: {applied or 'none'})",
+                **result,
+            }
+        report = ledger.verify()
+        problems = report.get("problems") or []
+        if report.get("ok", True):
+            return {"summary": f"ledger ok (schema {report.get('schema_version')})", **report}
+        # A failed integrity report is a runtime failure (exit 5), but callers still need the report.
+        raise _ReportError(
+            f"ledger verify found {len(problems)} problem(s)",
+            EXIT_RUNTIME,
+            {"problems": problems},
+            report,
+        )
     if args.cmd == "redact":
         from .contract import redact as redact_mod
 
@@ -280,6 +313,18 @@ def _captured_stdout(run: Callable[[], dict[str, Any]]) -> tuple[str, dict[str, 
 def _error_envelope(args, cfg, exc: Exception) -> dict[str, Any]:
     """Map one dispatch/binding exception to an envelope (EvalOpsError keeps its code, else exit 5)."""
     if isinstance(exc, EvalOpsError):
+        data = getattr(exc, "data", None)
+        if isinstance(data, dict):
+            # A command that returns a structured failure report (ledger verify) keeps it in `data`.
+            return envelope.failure(
+                args.cmd,
+                cfg.env,
+                exc.code,
+                str(exc),
+                hint=getattr(exc, "hint", None),
+                details=getattr(exc, "details", None),
+                data=data,
+            )
         return envelope.from_error(args.cmd, cfg.env, exc)
     return envelope.failure(args.cmd, cfg.env, envelope.EXIT_RUNTIME, f"{type(exc).__name__}: {exc}")
 
@@ -287,7 +332,11 @@ def _error_envelope(args, cfg, exc: Exception) -> dict[str, Any]:
 def _dispatch_envelope(args, cfg) -> dict[str, Any]:
     """Run ``dispatch`` and always return an envelope: usage errors, crashes and gate failures."""
     try:
-        return envelope.from_result(args.cmd, cfg.env, dispatch(args, cfg))
+        result = dispatch(args, cfg)
+        if args.cmd == "ledger" and getattr(args, "ledger_action", None) == "verify":
+            # The verify verdict is `data.ok`, not the envelope's success flag: keep it visible.
+            return envelope.success(args.cmd, cfg.env, dict(result))
+        return envelope.from_result(args.cmd, cfg.env, result)
     except Exception as e:  # noqa: BLE001 - unexpected failures are exit 5, never a traceback on stdout
         return _error_envelope(args, cfg, e)
 
