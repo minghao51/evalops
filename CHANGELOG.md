@@ -163,6 +163,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
   document gains additive fields (`schema_version`, per-span `unknown_attributes`), so a v1 reader
   sees the same rows line and a v2 reader sees the new metadata.
 
+### Added (WP2.1 — pipeline as code)
+
+- `evalops pipeline <pr|main|release|nightly> [--dry-run]`: the CI stage table is now declarative
+  Python (`src/evalops/pipeline.py`) instead of 74 lines of bash. Nested commands run in-process
+  through the same CLI dispatch/capture path; a failed step propagates its own exit code (1–7),
+  stops the stage, and keeps `data.steps`; the `--json` stdout is exactly one envelope and nested
+  envelopes go to `.evalops/out/ci_log.jsonl`.
+- `--dry-run` lists every command and action (including `commit_state` and the nightly
+  checkout/restore) with placeholders for dynamic values, and writes nothing.
+- `commit_state` keeps the bash rules: no-op when clean, exit 4 without `EVALOPS_BRANCH`, otherwise
+  commit + push to the branch; a git failure is exit 5 with git's stderr, never a raw git code.
+- Nightly now reads `data.baseline.git_sha` from the v1 envelope (the bash legacy top-level lookup
+  made it always skip), skips with exit 0 when there is no baseline, and restores the original ref
+  in a `finally`. The restore step records the ref/HEAD read after the call, so a skipped restore
+  cannot pass vacuously.
+- `ci/pipeline.sh` is a 7-line shim (`exec evalops pipeline "$@"`); the README documents the
+  command. No CI adapter YAML changed (phase 2.4 generates them).
+
+### Changed (WP2.1)
+
+- The pipeline entry point moved from bash to `evalops`; `bash ci/pipeline.sh <stage>` keeps working
+  and forwards every argument (`--dry-run`, `--json`).
+
 ## [0.3.0] - baseline
 
 The inherited v0.3 codebase: five plugin roles, seven environments, agent trace normalization,

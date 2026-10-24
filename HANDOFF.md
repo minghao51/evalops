@@ -1,10 +1,10 @@
-# HANDOFF: evalops — phase 1 closed (G1); phase 2 next (WP2.1)
+# HANDOFF: evalops — phase 2 in progress (WP2.1 done; WP2.2 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **283 offline + 1 Postgres contract test, deselected**).
+(tests: **305 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; G1 is closed and phase 2 starts at WP2.1. The completed
-`docs/packets/WP1.5.md` is the packet template.
+`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 is at WP2.2. The
+completed `docs/packets/WP2.1.md` is the packet template.
 
 ---
 
@@ -122,6 +122,7 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | WP1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round PASS + 1 narrow re-review) |
+| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `3fc9197` (1 BLOCK + 2 narrow PASS rounds) |
 
 **G1 closed** (2026-10-24): 283 tests, standalone 283/283, Postgres contract 1 passed, `make schema`
 zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
@@ -181,13 +182,29 @@ Every checklist item holds; evidence:
 - **Gates green:** `make check` 283, standalone 283/283, `make contract` 1 passed with `.[sql]` +
   docker, `make schema` zero drift, no golden change. CI `40078618397` (py3.10/3.11/3.12).
 
-### WP2.1 — `evalops pipeline <stage>` (NEXT)
+### WP2.1 — `evalops pipeline <stage>` (DONE, `3fc9197`)
 
-Write the packet from the map's phase-2 row. Expected done-when: a Python `evalops pipeline
-<stage>` (pr/main/release/nightly) with a declarative stage table, `--dry-run`, idempotent stages,
-and `ci/pipeline.sh` reduced to a shim; a fixture repo reproduces the bash stages and the dry-run
-lists every command it would run. Read `ci/pipeline.sh` and the phase-2 gate G2 (tag v0.4.0) before
-scoping.
+The CI stage table is now declarative Python: `evalops pipeline pr|main|release|nightly
+[--dry-run]`, nested commands in-process, exact exit-code propagation (1–7), one envelope on
+stdout, one JSON line per step in `.evalops/out/ci_log.jsonl`. `--dry-run` lists every
+command/action and writes nothing; `commit_state` keeps the bash rules (4 without a branch, 5 on a
+git failure); nightly reads `data.baseline.git_sha` (the legacy top-level bug is not reproduced),
+skips with exit 0 when there is no baseline, and restores the original ref in a `finally` (the
+restore step records the post-restore ref/HEAD). `ci/pipeline.sh` is a 7-line shim. 22 new tests
+(283 → 305). Review: 1 BLOCK (a raw git code could produce empty stdout and a traceback) + narrow
+PASS after the fix + a final PASS for the drain-code normalization.
+
+### WP2.2 — release re-verification, fork-PR locks, nightly baseline (NEXT)
+
+Write the packet from the map's phase-2 row. Deliverables:
+- **Release re-verification:** `release` refuses an evidence group that never passed the gate, and
+  re-checks guard + gate + baseline before promoting; bind the evidence group to the promoted
+  version (params/tags) so a stale group cannot be promoted.
+- **Fork-PR locks:** a PR from a fork cannot push locks to the source branch; handle it via a bot
+  branch (or a clear refusal), with the path tested in a fixture repo.
+- **Nightly baseline:** when there is no baseline, nightly **fails loudly** (non-zero, actionable
+  message) instead of the current exit-0 skip.
+- Keep the WP2.1 stage table/dry-run shape; add the new steps to the table and the dry-run.
 
 ## 7. Remaining roadmap (phases 2 → 6)
 
@@ -262,20 +279,20 @@ sed -n '/### Phase 1/,/### Phase 2/p' docs/IMPLEMENTATION_MAP.md
 
 Then:
 
-1. Write the WP2.1 packet from the map's phase-2 row (copy `docs/packets/WP1.5.md`'s shape) and
-   dispatch it to `evalops-worker` (`deepseek/deepseek-flash`) with `cwd` = the repo. Read
-   `ci/pipeline.sh` and the G2 gate first.
+1. Write the WP2.2 packet from the map's phase-2 row (copy `docs/packets/WP2.1.md`'s shape) and
+   dispatch it to `evalops-worker` (`deepseek/deepseek-flash`) with `cwd` = the repo. Read the
+   current `release`/`nightly` stages and the G2 gate first.
 2. Send the working tree (untracked test files included) to `evalops-reviewer`
    (`zai/glm-5.3-flash`, thinking `high`) with the packet's done-when.
 3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), push, and
    confirm CI with `gh run list`.
-4. Then WP2.2 (release re-verification, fork-PR locks, nightly baseline) and WP2.3 (presets), toward
-   G2 / tag `v0.4.0`.
+4. Then WP2.3 (presets + capability matrix), WP2.4 (CI adapters), WP2.5 (calibration enforcement),
+   toward G2 / tag `v0.4.0`.
 
 Suggested opening message for the new thread:
 
-> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. Phase 1 is closed (G1). Start phase 2:
-> write the WP2.1 packet (`evalops pipeline <stage>` in Python, `--dry-run`, idempotent stages, bash
-> shim) in the shape of `docs/packets/WP1.5.md`, dispatch it to `evalops-worker`
-> (deepseek/deepseek-flash), review with `evalops-reviewer` (zai/glm-5.3-flash, high), commit only
-> after PASS, then push and check CI.
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. Phase 1 is closed (G1) and WP2.1 is
+> done. Start WP2.2: write the packet (release re-verification + evidence-group→version binding,
+> fork-PR lock handling via a bot branch, nightly fails without a baseline) in the shape of
+> `docs/packets/WP2.1.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash), review with
+> `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI.
