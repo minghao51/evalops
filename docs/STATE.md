@@ -9,7 +9,8 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 - **Tests:** 193 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
   **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40058469207`, WP1.3).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** WP1.4 test debt (gate/cassette/calibrate/traces/promote/rollback/plan exit paths), then
+- **Next:** WP1.4 test debt (gate/cassette/calibrate/traces/promote/rollback/plan exit paths;
+  packet ready at [`packets/WP1.4.md`](packets/WP1.4.md)), then
   WP1.5 trace model v2. Postgres contract suite: `make contract` with `evalops[sql]` installed.
 
 ## Work packages

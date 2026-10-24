@@ -1,8 +1,10 @@
-# HANDOFF: evalops — phase 0 done, phase 1 next
+# HANDOFF: evalops — phase 1 nearly done (WP1.4 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-Read this file, then `docs/IMPLEMENTATION_MAP.md` (the plan) and `docs/CONTRACT.md` (the invariants).
-`docs/STATE.md` is the short status board.
+(tests: **193 offline + 1 Postgres contract test, deselected**).
+Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
+`docs/STATE.md` is the short status board; the dispatch-ready packet for the next WP is
+`docs/packets/WP1.4.md`.
 
 ---
 
@@ -12,25 +14,27 @@ Backend-agnostic versioning, evaluation, gating and cost control for LLM apps **
 evalops delegates execution, tracing, storage and model calls to a backend and owns only the glue:
 version pinning (prompts/datasets/behavior config/judges), the 5-role plugin contract, normalized
 agent traces, statistics + gates, the CLI/pipeline contract, safety (redaction, budgets, breaker) and
-reproducibility (cassettes).
+reproducibility (cassettes). **Wrap and normalize, never rebuild.**
 
 - **Backends:** MLflow / Databricks, Langfuse, LangSmith, Logfire, plain git + SQL, or your plugin.
 - **Interface:** one CLI for humans, CI and coding agents — stable exit codes `0–7`, frozen JSON envelope.
 - **History:** v0.3.0 imported as the baseline (`0a538e2`, 17 tests). Phase 0 added the contract,
-  typed config, versioned formats, envelope and dev tooling. **Now 193 tests, all offline** (+1 Postgres contract test).
+  typed config, versioned formats, envelope and dev tooling. Phase 1 added redaction (WP1.1), gate
+  statistics + row identity (WP1.3) and ledger integrity (WP1.2).
 
 ## 2. Non-negotiables (read before editing anything)
 
 1. **Contract first.** `docs/CONTRACT.md` is normative: exit codes, envelope shape, the five port
-   invariants, identity-hash rules, format policy, judge pinning. Changing it needs an ADR + a map entry.
-2. **Formats are additive and versioned.** `FORMAT_VERSION = 1`. Readers accept v0; a future
-   `schema_version` is exit 7 naming the file, never a silent misread. Identity hashes (cassette,
-   dataset fingerprint, `app_version`) cover **semantic fields only** — stamping metadata must never
-   change them (pinned by the constant `73357e6c4b54`).
+   invariants, identity-hash rules, format policy, judge pinning, redaction, statistics. Changing it
+   needs an ADR + a map entry.
+2. **Formats are additive and versioned.** `FORMAT_VERSION = 1` (ledger *table* schema is a separate
+   version, `LEDGER_SCHEMA_VERSION = 1`). Readers accept v0; a future `schema_version` is exit 7
+   naming the file, never a silent misread. Identity hashes (cassette, dataset fingerprint,
+   `app_version`) cover **semantic fields only** — stamping metadata must never change them (pinned
+   by the constant `73357e6c4b54`).
 3. **Core is vendor-free.** No module-level import of mlflow/langfuse/langsmith/logfire/litellm/
    langchain/openai/pydantic_ai/otel/sqlalchemy outside `src/evalops/plugins/` and
-   `src/evalops/traces/`. Enforced by an AST guard in `tests/unit/test_no_vendor_imports.py`; read
-   its docstring for what it deliberately cannot see.
+   `src/evalops/traces/`. Enforced by an AST guard in `tests/unit/test_no_vendor_imports.py`.
 4. **Nothing outside the envelope on stdout** in `--json` mode; diagnostics go to stderr. Exit code
    must equal `envelope.code`.
 5. **Never weaken a gate, test or guard to go green.** If a test's expectation is genuinely obsolete,
@@ -39,15 +43,25 @@ reproducibility (cassettes).
 
 ## 3. Working environment (important)
 
-There is **no system pip** on this machine (Ubuntu, externally managed). Use the existing `.venv`
-or `uv`:
+There is **no system pip** on this machine (Ubuntu, externally managed). Use the existing `.venv` or `uv`:
 
 ```bash
 cd evalops
-.venv/bin/python -m pytest -q          # 193 tests + 1 contract (deselected)
-.venv/bin/python tests/run_without_pytest.py   # dependency-free runner
-make check                             # ruff + mypy + pytest (what CI runs)
-make schema                            # regenerate docs/evalops.schema.json
+.venv/bin/python -m pytest -q                    # 193 tests (+1 contract deselected)
+.venv/bin/python tests/run_without_pytest.py     # dependency-free runner
+make check                                       # ruff + format + mypy + pytest (what CI runs)
+make schema                                      # regenerate docs/evalops.schema.json
+make contract                                    # Postgres suite: skips unless evalops[sql] + docker
+```
+
+Postgres contract work (WP1.2 established this pattern):
+
+```bash
+uv venv /tmp/pgvenv --python .venv/bin/python
+uv pip install --python /tmp/pgvenv/bin/python -e ".[sql]"
+docker compose -f tests/contract/docker-compose.yml up -d
+/tmp/pgvenv/bin/python -m pytest -q -m contract tests/contract -v
+docker compose -f tests/contract/docker-compose.yml down -v
 ```
 
 Fresh clone: `uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"`.
@@ -62,132 +76,164 @@ Three agents, defined in `.pi/agents/` (project scope, symlinked at the session 
 | `evalops-worker` | `deepseek/deepseek-flash` | implements exactly one WP, tests green, **no commits** |
 | `evalops-reviewer` | `zai/glm-5.3-flash` @ high | adversarial review: runs commands, falsifies claims, PASS/BLOCK |
 
-Per WP: **packet → worker → reviewer → orchestrator commits**. The packet must state goal, allowed
-paths, forbidden actions, falsifiable done-when, and the exact commands to run. Writers are
-serialized per module family; at most two parallel workers in disjoint trees.
+Per WP: **packet → worker → reviewer → orchestrator commits**. The packet states goal, allowed paths,
+forbidden actions, falsifiable done-when and the exact commands. Writers are serialized per module
+family; at most two parallel workers in disjoint trees.
 
-Observed in phase 0: 12 BLOCK rounds / 35 defects. WP1.1: 4 rounds (2 BLOCK, then 2 PASS after an
-orchestrator-found replay-miss leak), 6 defects. WP1.3: 1 round (PASS, one dead-code cleanup).
-WP1.2: 2 rounds (BLOCK on a live Postgres READ COMMITTED race + missing lifecycle docs, then PASS
-after a single-statement upsert and dialect dispatch). Phases 1–2 WPs will take 2–3 rounds each.
-Budget for it; do not skip review to "save time" — every round found something real, including a
-functional regression (`rollback --version 1` being parsed as the top-level version flag).
+Observed review budget:
+
+| Work | Rounds | Defects found |
+|---|---|---|
+| phase 0 (7 WPs) | 12 BLOCK | 35 |
+| WP1.1 redaction | 4 (2 BLOCK + 1 orchestrator-found leak) | 6 |
+| WP1.2 ledger | 2 (BLOCK on a live Postgres race) + 1 narrow dialect round | 3 |
+| WP1.3 statistics | 1 (PASS, one cleanup) | 1 |
+
+Budget 1–3 rounds. Do not skip review to save time — every round found something real. If you find a
+leak after a PASS (as happened in WP1.1 with replay-miss tool args), dispatch a narrow fix round and
+a narrow re-review; do not commit an unreviewed change.
 
 Commit style: one logical change per commit, imperative subject, body explains the *why*, the WP id,
-and the review rounds. Never commit with a red suite.
+and the review rounds. Never commit with a red suite. Docs commits are separate (`docs: WP1.x state…`).
 
-## 5. Where phase 1 left off
+## 5. Where phase 0 + 1 stand
 
-| WP | State | Evidence |
+| WP | State | Commit |
 |---|---|---|
 | 0.0 repo/agents/map | done | `16ce2e1` |
 | 0.1 contract + ADRs 0001–0007 | done | `6280873` |
 | 0.2 test layout, ruff/mypy, `make check`, CI, vendor-import guard | done | `6280873`…`09c26fb` |
 | 0.3 typed config (pydantic v2) + generated schema + `evalops config` | done | `f0da4ce` |
 | 0.4 versioned formats + semantic fingerprints | done | `6280873` |
-| 0.5 envelope freeze + 17 goldens + exit matrix 0–7 | done | `7d7d8f1` |
-| 0.6 state/changelog/**first CI run** | done | run `40047473262`: 3.10/3.11/3.12 all green |
-| 1.1 redaction (3 boundaries, strict, `redact --check`, demo of `src/` formatting) | done | `73c5dc7` |
+| 0.5 envelope freeze + goldens + exit matrix 0–7 | done | `7d7d8f1` |
+| 0.6 state/changelog/first CI run | done | `022be67` + run `40047473262` |
+| 1.1 redaction (3 boundaries, strict, `redact --check`, `src/` formatting) | done | `73c5dc7` |
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` |
 | 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
 
-One compromise carried forward:
-- Vendor plugins are still **unverified** (`VERIFY` markers) and logfire reads a private SQL table.
-  That is phase 3, behind docker/credentials.
+CI green on `main` after each docs commit: `40054567708` (WP1.1), `40058469207` (WP1.3),
+`40065497434` (WP1.2).
 
-The phase-0 `src/` formatting compromise is closed: `make check` now formats both trees.
-Also closed: the replay-miss leak of tool args into `last_eval.json`/`data.tool_replay_misses`.
-New, documented consequence of WP1.1: a redacted cassette is lossy on reload (CONTRACT §5.1).
+**Carried compromises** — 10 items, tracked in [`docs/STATE.md`](docs/STATE.md) §Known compromises.
+Read them before promising anything. The ones that bite:
+- vendor plugins remain unverified (`VERIFY` markers; logfire reads a private SQL table) — phase 3;
+- a redacted cassette is lossy on reload; record/replay identity needs `mode: off` or hash-only rules;
+- redaction covers run payloads, not `evalops.yaml`/ledger params;
+- budget reservations are atomic only on the SQL ledger; a crash between reserve and settle leaves the
+  month charged and `verify` cannot see it (no `ledger release` yet);
+- MySQL budget reservation is text-verified only; a fresh/legacy SQL ledger reports `schema_version: 0`
+  until `evalops ledger migrate`;
+- pass^k is the plug-in estimator; row alignment falls back to `row_id` without `row_key`;
+- a mid-artifact-loop backend write failure can leave a prefix (no manifest yet to flag it).
 
-## 6. Phase 1 — what is next
+## 6. Phase 1 — what is left
 
-Full detail in `docs/IMPLEMENTATION_MAP.md` §2. **WP1.1 (redaction) and WP1.3 (statistics) are
-done**, as is **WP1.2 (ledger integrity)** (`73c5dc7`, `eb30dd0`, `2a3ac40`; CONTRACT §3.3.1, §5.1,
-§9). Start with **WP1.4** (test debt), then WP1.5 (trace model v2). `make contract` runs the
-Postgres suite when `evalops[sql]` is installed and docker is available; it skips otherwise.
+### WP1.4 — test debt (NEXT; packet ready)
 
-### WP1.1 — redaction (DONE, `73c5dc7`)
+Dispatch `docs/packets/WP1.4.md` as-is. It requires tests for `gate.check`/`reliability`/`ci_lower`/
+`check_rows`, cassettes (record/replay/miss/fingerprint/corrupt), `calibrate._stats`, `evalops
+traces`, `promote` (all three aliases + the three guard refusals), `rollback`, `plan` budget failure,
+and **every exit code 0–7 reachable through a real command path** (exit 4 is currently unasserted).
+It also demands mutation evidence: break each covered branch and show a named test goes red.
 
-One rule set (`fields` globs → `patterns` → `hash` → `hook`) at exactly three outbound boundaries
-(ledger artifacts, `AgentTrace.to_dict`, `Cassette.save`), applied on deep copies after identity
-hashing; `evalops redact [--check]` is a read-only dry run; `EVALOPS_REDACT=strict|off`; strict
-verifies every buffered artifact before the first ledger write (exit 5, nothing persisted).
-Artifacts are staged, the manifest is written verbatim (a digest-matching rule cannot break it).
-The new config section is `redact:`; `docs/evalops.schema.json` is regenerated. 26 tests in
-`tests/unit/test_redact.py`, including a planted-secret sweep, strict atomicity, hypothesis
-idempotence, non-JSON normalization, manifest integrity and two-config isolation.
+### WP1.5 — trace model v2 + capture hardening (after 1.4)
 
-### WP1.3 — statistics (DONE, `eb30dd0`)
+Expected done-when (write the full packet from the map's row then):
+- `AgentTrace` gains `schema_version` (v1 reads, v2 writes; round-trip both) and a documented
+  `source` value set; no identity-hash change.
+- Unknown span attributes are **reported**, not silently dropped: an allowlist/`unknown_attributes`
+  collection surfaced by `evalops traces` (and in the rows artifact additively).
+- Breaker parity notes per capture path (OpenAI Agents cannot abort → enforce `max_turns`/timeout) and
+  a regression test per supported capture path.
+- Fixtures: v1 + v2 traces; a test that a v1 artifact still gates.
 
-Sample stdev; normal-approx `min_ci_lower` unchanged plus Wilson CIs (`min_pass_hat_k_wilson`) and
-bootstrap (`min_ci_lower_bootstrap`); exact plug-in `pass^k` with integer repeat ordering and
-ragged-input flags; `datasets.row_key` (content hash + `#n` for duplicates) carried additively in
-rows.jsonl and used for gate alignment (v0 falls back to `row_id`); baseline pinned by group +
-`app_version` + `dataset_fingerprint` (gate fails on a moved baseline or different dataset); drift
-(delta, pct, Cohen's d, z, two-sided p, paired-by-row bootstrap CI); change attribution in
-`gate_report.md` + `data.attribution`. 28 tests in `tests/unit/test_gate_stats.py`.
+### G1 gate (phase 1 exit)
 
-### WP1.2 — ledger integrity (DONE, `2a3ac40`)
+Redaction proven; formats verified; statistics property-tested; every exit path tested. After WP1.4 +
+WP1.5 run the map's G1 checklist and update `docs/STATE.md`.
 
-Ledger schema v1 with transactional `migrate()` and read-only `verify()` (orphans, artifact hashes,
-budget totals, future version); atomic budget reserve/settle/release (one re-applying upsert per
-dialect; advisory defaults for non-SQL ledgers) wired into `run.evaluate`; explicit UTC month
-boundary; chunked `find_runs` (21 → 2 statements). Postgres contract test in `tests/contract/`
-(docker compose, skipped without the `sql` extra); MySQL reservation is text-verified only.
+## 7. Remaining roadmap (phases 2 → 6)
 
-### WP1.4 / 1.5 (NEXT)
+| Phase | WPs | Deliverable | Gate / needs |
+|---|---|---|---|
+| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim); 2.2 release re-verification + fork-PR locks + nightly fails without baseline; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins); 2.5 calibration enforced in the pipeline | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
+| **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned = exit 2); 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement, resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
+| **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
+| **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
+| **5** real framework trace fixtures | 5.1 real span fixtures × pinned versions (LangGraph, OpenAI Agents, ADK, Pydantic AI, CrewAI, LlamaIndex, Strands, AutoGen, Semantic Kernel, smolagents, DSPy); 5.2 verified dialect table + `traces --unknown-attrs`; 5.3 breaker parity + runaway-loop tests; 5.4 cassette parity + consent-gated record | 11 frameworks verified, drift visible in CI | **G5**. Heavy: installing 11 frameworks with pinned versions; needs user consent for recorded traces. |
+| **6** release, docs, ecosystem | 6.1 publish under the D1 name + v1.0.0 + tag→build→matrix→publish workflow; 6.2 docs regeneration (README doctest, PLUGINS, AGENT_TRACES, ADR index); 6.3 plugin SDK (entry-point spec, `evalops plugin new`, conformance kit); 6.4 compatibility policy + deprecation table | installable from PyPI, 2 external plugins certified | **G6**: v1.0.0. Needs PyPI/org + LICENSE + settled name. |
 
-- 1.4 test debt: unit tests for `gate.reliability/ci_lower/check_rows`, cassettes, `calibrate._stats`,
-  `evalops traces`, `promote --candidate/staging`, `rollback`, plan budget failure.
-- 1.5 trace model v2 + unknown-attribute reporting.
+Order note: **3b before 3** (D6) — judge adapters are pure code and unblock the gate; phase 3 needs
+live services and credentials.
 
-## 7. Open decisions / blockers
+## 8. Open decisions / blockers
 
 | Item | State | Needs |
 |---|---|---|
-| **Distribution name** | keep import `evalops`; PyPI `evalops`/`evalops-sdk` and GitHub org `evalops` belong to Deixic, Inc. (observed 2026-10-23). `evalplane`, `agentgates`, `evalops-core` are free. | decide in WP6.1; ADR 0001 |
-| **LICENSE file** | ADR 0002 chose Apache-2.0; no file/metadata yet (deliberately deferred to WP6.1) | add at WP6.1 |
-| **Phase 3 credentials** | docker is available; LangSmith/Logfire/Databricks need keys | ask the user before phase 3 |
+| **Distribution name** | import stays `evalops`; PyPI `evalops`/`evalops-sdk` and GitHub org `evalops` belong to Deixic, Inc. `evalplane`, `agentgates`, `evalops-core` are free. | user decides at WP6.1 (ADR 0001) |
+| **LICENSE file** | ADR 0002 chose Apache-2.0; no file/metadata yet (deferred to WP6.1) | add at WP6.1 |
+| **Phase 3 credentials** | docker is available; LangSmith/Logfire/Databricks need keys | **ask the user before phase 3** |
+| **MySQL contract service** | budget upsert is dialect-correct but text-verified only | optional: add a mysql service to `tests/contract/` |
+| **Reservation repair** | a crashed run's reservation stays charged; `verify` cannot see it | future `evalops ledger release` or expiry policy |
 | **`config explain` shape** | `data.data` / `data.provenance` (kept for payload stability) | rename only with a contract bump |
 | **Cost goldens** | amounts are masked (types pinned) | tighten if cost accounting regresses |
 
-## 8. Map of the code
+## 9. Map of the code
 
 ```text
 src/evalops/
   contract/formats.py    FORMAT_VERSION, _meta, semantic hashes, FormatError(exit 7), manifest
+  contract/redact.py     redaction rules + the three outbound sinks + `redact --check`
   config/                pydantic models, generated schema, load/Config/provenance, `evalops config`
   envelope.py            envelope builders, EXIT_MATRIX, one-document render
   cli.py                 argparse + dispatch + envelope + fd/stream capture + --version
-  ports.py               5 role ABCs + dataclasses (RowResult/Usage/LoadedPrompt/RunRecord)
+  ports.py               5 role ABCs + dataclasses (RowResult incl. row_key/Usage/LoadedPrompt/RunRecord)
+                         + ledger capability defaults (migrate/verify/budget_*)
   registry.py            builtin + entry-point + "module:Class" plugins, role capability check
   run.py                 plan/evaluate/baseline/show_traces (the only way evaluations run)
-  gate.py                aggregate + check + pass^k/pass@k + CI lower bound + report
-  cost.py                estimate/measure/budget/month spend
+  gate.py                aggregate + check + pass^k/pass@k + Wilson/bootstrap + row_key alignment
+                         + pinned baseline + drift + attribution
+  cost.py                estimate/measure/budget (UTC month) /month spend/reservations
   calibrate.py           judge calibration vs human labels (agreement/kappa/MAE)
   guard.py               static bypass guard
   scoring.py             neutral scorer protocol + normalization + aggregation
-  tools.py               cassettes (record/replay), semantic fingerprint
+  tools.py               cassettes (record/replay), semantic fingerprint, redacted miss labels
   locks.py               per-env locks, reserved _meta, entries()
-  prompts.py datasets.py prompt/dataset sync, content-addressed snapshots, aliases
+  prompts.py datasets.py prompt/dataset sync, content-addressed snapshots, aliases, row_key/baseline pin
   traces/                model (AgentTrace), normalize (4 dialects), capture, instrument, langchain, openai_agents
   scorers/               trajectory scorers + judge adapters
-  plugins/               git, sql, core, mlflow, langfuse, langsmith, logfire
+  plugins/               git, sql (schema v1 + budget), core, mlflow, langfuse, langsmith, logfire
 tests/
-  unit/                  contract/formats, config, envelope, guard, scorers, traces
+  unit/                  contract/formats, config, envelope, guard, redact, gate_stats, ledger_sql,
+                         cost_budget, traces, scorers, no-vendor-imports, core
   integration/           full lifecycle on zero-dep plugins (local + agent)
+  contract/              Postgres ledger (docker compose; skipped offline)
   fixtures/              fake apps, v0 format fixtures, envelope goldens
-docs/                    IMPLEMENTATION_MAP, CONTRACT, STATE, PLUGINS, AGENT_TRACES, MLFLOW_*, adr/
+docs/                    IMPLEMENTATION_MAP, CONTRACT, STATE, PLUGINS, AGENT_TRACES, MLFLOW_*, adr/,
+                         packets/ (dispatch-ready WP packets)
 ci/                      pipeline.sh + GH/GitLab/Azure adapters (phase 2 replaces with `evalops pipeline`)
 ```
 
-## 9. First three commands
+## 10. First commands in the new thread
 
 ```bash
 cd evalops && make check
-gh run list --limit 1                 # confirm CI is green on main
-sed -n '/## 2. Work packages/,/## 3. Testing/p' docs/IMPLEMENTATION_MAP.md
+gh run list --limit 1                       # confirm CI green on main
+sed -n '/### Phase 1/,/### Phase 2/p' docs/IMPLEMENTATION_MAP.md
 ```
 
-Then write the WP1.3 packet and dispatch `evalops-worker`; send the diff to `evalops-reviewer` at
-high before committing.
+Then:
+
+1. Read `docs/packets/WP1.4.md` and dispatch it to `evalops-worker`
+   (`deepseek/deepseek-flash`) with `cwd` = the repo.
+2. Send the working tree (untracked test files included) to `evalops-reviewer`
+   (`zai/glm-5.3-flash`, thinking `high`) using the review prompt at the end of the packet.
+3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), push, and
+   confirm CI with `gh run list`.
+4. Then write the WP1.5 packet from §6 and repeat.
+
+Suggested opening message for the new thread:
+
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. We are at phase 1, WP1.4 next.
+> Dispatch `docs/packets/WP1.4.md` to `evalops-worker` (deepseek/deepseek-flash), review with
+> `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI.
