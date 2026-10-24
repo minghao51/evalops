@@ -79,7 +79,14 @@ def load_locked(cfg: Any, reg: Any) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def promote(cfg: Any, reg: Any, alias: str, evidence_group: str) -> dict[str, Any]:
-    """Move `alias` on every locked prompt, only with a passing, promotable evidence group."""
+    """Move `alias` on every locked prompt, only with a passing, promotable evidence group.
+
+    ``production`` additionally binds the evidence group to the version it promoted: every run of the
+    group is tagged ``evalops.released.production`` / ``evalops.released.app_version`` (additive
+    ledger tags, CONTRACT §5), and a group that already carries the marker is refused with exit 4.
+    That is what makes a stale group unreleasable through the front door -- the same group can never
+    be released twice. ``candidate``/``staging`` stay re-runnable and write no released tags.
+    """
     ledger, store, lock = reg.get("ledger"), reg.get("prompts"), locks.entries(locks.read(cfg, KIND))
     runs = ledger.find_runs(tags={"evalops.group": evidence_group})
     if not runs:
@@ -92,6 +99,8 @@ def promote(cfg: Any, reg: Any, alias: str, evidence_group: str) -> dict[str, An
         mismatched = [n for n, e in lock.items() if r.params.get(f"prompt.{n}") != ref(e)]
         if mismatched:
             raise EvalOpsError(f"evidence used different prompt versions: {mismatched}", EXIT_GUARD)
+    if alias == "production":
+        _refuse_a_released_group(runs, evidence_group)
 
     moves = []
     for name, entry in lock.items():
@@ -113,8 +122,30 @@ def promote(cfg: Any, reg: Any, alias: str, evidence_group: str) -> dict[str, An
             }
             ledger.log(r.run_id, tags={k: str(v) for k, v in pin.items() if v})
     for r in runs:
-        ledger.log(r.run_id, tags={f"evalops.promoted.{alias}": json.dumps(moves)})
+        tags = {f"evalops.promoted.{alias}": json.dumps(moves)}
+        if alias == "production":
+            # Bind the evidence group to the version it released (WP2.2 B1): additive ledger tags
+            # only, read from the same param the baseline pin reads.
+            tags["evalops.released.production"] = "true"
+            released_version = r.params.get("app_version")
+            if released_version:
+                tags["evalops.released.app_version"] = str(released_version)
+        ledger.log(r.run_id, tags=tags)
     return {"summary": f"moved @{alias} for {len(moves)} prompt(s) via {store.name}", "moves": moves}
+
+
+def _refuse_a_released_group(runs: list[Any], evidence_group: str) -> None:
+    """Exit 4 for a group that already released to production: a fresh main-stage group is required."""
+    released = [r for r in runs if r.tags.get("evalops.released.production") == "true"]
+    if not released:
+        return
+    version = released[0].tags.get("evalops.released.app_version") or released[0].params.get("app_version")
+    raise EvalOpsError(
+        f"evidence group {evidence_group} was already released to production"
+        f"{f' at app_version {version}' if version else ''}; a fresh main-stage evidence group is required"
+        " (`evalops pipeline main`, then `evalops pipeline release`)",
+        EXIT_GUARD,
+    )
 
 
 def rollback(cfg: Any, reg: Any, alias: str, prompt: str, version: str) -> dict[str, Any]:

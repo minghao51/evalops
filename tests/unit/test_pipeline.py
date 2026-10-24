@@ -177,10 +177,17 @@ def test_dry_run_lists_every_stage_and_writes_nothing():
 
         code, release = proj.run_cli(root, "pipeline", "release", "--dry-run")
         assert code == 0 and release["code"] == 0, release
+        # WP2.2 (H1/A4): the release stage re-verifies now: guard -> gate -> baseline -> promote.
         assert _table(release) == [
+            ("guard", ["guard"], True),
+            ("gate", ["gate", "--group", "<EVIDENCE_GROUP>"], True),
+            ("baseline", ["baseline"], True),
             ("promote", ["promote", "--alias", "production", "--evidence-group", "<EVIDENCE_GROUP>"], True),
             ("commit_state", None, True),
         ]
+        assert [step["kind"] for step in _steps(release)] == ["evalops", "evalops", "evalops", "evalops", "vcs"]
+        assert _steps(release)[1]["command"] == "evalops gate --group <EVIDENCE_GROUP>"
+        assert "HEAD:main" in _steps(release)[-1]["command"]
 
         code, nightly = proj.run_cli(root, "pipeline", "nightly", "--dry-run")
         assert code == 0 and nightly["code"] == 0, nightly
@@ -446,6 +453,13 @@ def test_main_promotes_candidate_and_release_moves_production():
         code, release = proj.run_cli(root, "pipeline", "release", env_extra={"EVIDENCE_GROUP": group})
         assert code == 0 and release["code"] == 0, release
         assert release["data"]["evidence_group"] == group
+        # WP2.2 (H1/A1): guard -> gate --group -> baseline -> promote -> commit_state, in that order
+        assert _names(release) == ["guard", "gate", "baseline", "promote", "commit_state"]
+        assert _steps(release)[1]["argv"] == ["gate", "--group", group]
+        assert _steps(release)[3]["argv"] == ["promote", "--alias", "production", "--evidence-group", group]
+        assert all(step["code"] == 0 and step["ok"] is True for step in _executed(release)), release
+        # the release stage records the baseline step but writes no baseline.json (nightly-only)
+        assert not (root / ".evalops" / "out" / "baseline.json").exists()
         assert json.loads(aliases.read_text()) == {"candidate": "1", "production": "1"}
         assert next(s for s in _steps(release) if s["name"] == "commit_state")["committed"] is True
         baseline = proj.run_cli(root, "baseline")[1]
@@ -461,18 +475,25 @@ def test_main_promotes_candidate_and_release_moves_production():
 
 
 # ---------------------------------------------------------------------------
-# (B/H5) nightly: no baseline skips; with baseline it checks out, controls, restores
+# (B/H5) nightly: no baseline fails loudly; with baseline it checks out, controls, restores
 # ---------------------------------------------------------------------------
-def test_nightly_without_a_baseline_skips_the_control_run():
+def test_nightly_without_a_baseline_fails_loudly():
+    """WP2.2 (D1/D2, replaces the WP2.1 exit-0 skip): no baseline is a failure with a remedy."""
     root = _golden_project()
     try:
         code, envelope = proj.run_cli(root, "pipeline", "nightly")
-        assert code == 0 == envelope["code"], envelope
-        assert _names(envelope) == ["baseline", "control"]
-        assert _steps(envelope)[0]["code"] == 0
+        assert code == 1 == envelope["code"], envelope
+        assert envelope["ok"] is False and envelope["command"] == "pipeline"
+        assert _names(envelope) == ["baseline", "control"], "no checkout/restore without a baseline"
+        baseline = _steps(envelope)[0]
+        assert baseline["code"] == 0 and baseline["ok"] is True
         control = _steps(envelope)[1]
-        assert control["skipped"] is True and control["kind"] == "skip"
-        assert "baseline git_sha" in control["reason"]
+        assert control["ok"] is False and control["code"] == 1, control
+        assert control.get("skipped") is not True, "a missing baseline is a failure, not a skip"
+        assert control["reason"] and "baseline" in control["reason"]
+        message = envelope["errors"][0]["message"]
+        assert "pipeline nightly step 'control' failed with exit code 1" in message, message
+        assert "release" in message and "promote --alias production" in message, message
         assert not (root / ".evalops" / "out" / "last_eval.json").exists(), "no control eval ran"
         written = json.loads((root / ".evalops" / "out" / "baseline.json").read_text())
         assert written["command"] == "baseline" and written["data"]["baseline"] is None
@@ -620,9 +641,12 @@ def test_nested_steps_load_the_same_config_file_the_pipeline_was_given():
         (root / "evalops.yaml").unlink()
         proj.commit(root, "custom config name")
         code, envelope = proj.run_cli(root, "--config", "custom.yaml", "pipeline", "nightly")
-        assert code == 0 and envelope["code"] == 0, envelope
+        # WP2.2 (D1): no production baseline is exit 1 now, but the nested baseline step still ran
+        # with the pipeline's own config file -- otherwise the load would have failed with exit 2.
+        assert code == 1 == envelope["code"], envelope
         assert _names(envelope) == ["baseline", "control"]
         assert _steps(envelope)[0]["code"] == 0, "the nested baseline step found custom.yaml"
+        assert _steps(envelope)[0]["ok"] is True
     finally:
         _clean(root)
 

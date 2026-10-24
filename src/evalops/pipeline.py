@@ -10,13 +10,23 @@ Stages (normative, same order and flags as the bash script):
   pr      guard -> sync all -> commit_state -> [calibrate] -> plan(smoke, pr) -> eval(smoke, pr) -> gate
   main    guard -> sync all --check -> [calibrate] -> plan(golden, main) -> eval(golden, main) -> gate
           -> read group from last_eval.json -> promote --alias candidate -> commit_state
-  release require EVIDENCE_GROUP -> promote --alias production -> commit_state
-  nightly baseline -> [checkout baseline git_sha -> eval(golden, control) -> gate --label drift]
+  release require EVIDENCE_GROUP -> guard -> gate --group $EVIDENCE_GROUP -> baseline
+          -> promote --alias production --evidence-group $EVIDENCE_GROUP -> commit_state
+  nightly baseline -> [no baseline git_sha -> record the control step failed (exit 1)]
+          -> [checkout baseline git_sha -> eval(golden, control) -> gate --label drift]
           -> restore the original ref in a ``finally``
 
 ``calibrate`` runs only when ``datasets/<CALIBRATION_DATASET>.jsonl`` exists. ``EVALOPS_BRANCH``
 defaults to ``main`` for the ``main``/``release`` state commits (``pr`` has no default, exactly like
 the bash ``:=`` behaviour), and ``EVALOPS_ACTOR`` defaults to ``ci`` before the first step.
+
+``EVALOPS_PR`` routes the state commit to the bot branch ``evalops/state/pr-<N>`` (force-pushed:
+derived state where the latest run of a PR wins) instead of a protected source branch, so a PR from a
+fork can still publish its locks; neither ``EVALOPS_BRANCH`` nor its default is needed then. The
+``release`` stage re-verifies ``guard`` + ``gate --group`` + ``baseline`` **now** before ``promote``
+touches an alias: a stale ``EVIDENCE_GROUP`` is caught by the gate step (exit 1), and ``promote``
+itself refuses a group it already released (exit 4). ``nightly`` fails loudly (exit 1, actionable
+message) when the ``baseline`` step reports no production baseline.
 
 Exit codes are never collapsed: a failed step propagates its own code (1 gate, 2 usage, 3 budget,
 4 guard, 5 runtime, 6 capability, 7 contract) through an ``EvalOpsError`` that carries ``data``, so
@@ -44,7 +54,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .contract import formats
-from .util import EXIT_GUARD, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError
+from .util import EXIT_GATE_FAILED, EXIT_GUARD, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError
 
 #: The stages this command accepts, in the order the CLI help lists them.
 STAGES = ("pr", "main", "release", "nightly")
@@ -60,6 +70,16 @@ EVIDENCE_PLACEHOLDER = "<EVIDENCE_GROUP>"
 BASELINE_PLACEHOLDER = "<baseline git_sha>"
 REF_PLACEHOLDER = "<original ref>"
 BRANCH_PLACEHOLDER = "<EVALOPS_BRANCH>"
+PR_PLACEHOLDER = "<EVALOPS_PR>"
+BOT_BRANCH_PREFIX = "evalops/state/pr-"
+NO_BASELINE_MESSAGE = (
+    "no production baseline: establish one with `evalops pipeline release` (or "
+    "`evalops promote --alias production`) and re-run `evalops pipeline nightly`"
+)
+NO_BASELINE_NOTE = (
+    "without a production baseline the nightly stage fails loudly (exit 1) instead of running "
+    "the control eval: establish one with `evalops pipeline release`"
+)
 
 EVALOPS = "evalops"
 VCS = "vcs"
@@ -89,6 +109,10 @@ class _Step:
     reason: str | None = None
     command: str | None = None
     undo: _Step | None = None
+    #: the nightly-only ``.evalops/out/baseline.json`` write (the release stage records only)
+    writes_baseline: bool = False
+    #: a step the stage records as failed without executing it (nightly: no baseline to compare)
+    fail_code: int | None = None
 
     def text(self) -> str:
         if self.command:
@@ -108,6 +132,7 @@ class _Context:
     calibration: str
     evidence_group: str | None
     branch: str | None
+    pr: str | None = None
     baseline_sha: str = ""
     pending_undo: list[_Step] = field(default_factory=list)
     error_detail: str = ""
@@ -119,9 +144,21 @@ class _Context:
 # ---------------------------------------------------------------------------
 # stage table
 # ---------------------------------------------------------------------------
-def _ev(name: str, argv: list[str], *, run: bool = True, reason: str | None = None) -> _Step:
+def _ev(
+    name: str, argv: list[str], *, run: bool = True, reason: str | None = None, writes_baseline: bool = False
+) -> _Step:
     kind = EVALOPS if run else SKIP
-    return _Step(name=name, kind=kind, argv=argv, run=run, reason=reason)
+    return _Step(name=name, kind=kind, argv=argv, run=run, reason=reason, writes_baseline=writes_baseline)
+
+
+def _refused(name: str, argv: list[str], code: int, reason: str) -> _Step:
+    """A step the stage records as failed without executing it (nightly without a baseline)."""
+    return _Step(name=name, kind=EVALOPS, argv=argv, run=False, reason=reason, fail_code=code)
+
+
+def _bot_branch(pr: str) -> str:
+    """The fork-PR state branch: derived state, so the latest run of that PR wins."""
+    return f"{BOT_BRANCH_PREFIX}{pr}"
 
 
 def _vcs(name: str, argv: list[str] | None, *, command: str, undo: _Step | None = None) -> _Step:
@@ -142,6 +179,15 @@ def _calibrate_step(ctx: _Context) -> _Step:
 
 def _commit_state_step(ctx: _Context) -> _Step:
     """The bash ``commit_state``: stage state, no-op when clean, commit+push when a branch is known."""
+    if ctx.pr:
+        # A fork PR cannot push `.evalops/locks` to the protected source branch: publish the derived
+        # state on a bot branch instead (the latest run of the PR wins, hence --force).
+        pr = PR_PLACEHOLDER if ctx.dry_run else ctx.pr
+        command = (
+            f"git add -A .evalops/locks .evalops/store && git commit -m {COMMIT_MESSAGE!r} && "
+            f"git push --force origin HEAD:refs/heads/{_bot_branch(pr)}"
+        )
+        return _vcs("commit_state", None, command=command)
     branch = ctx.branch or BRANCH_PLACEHOLDER
     command = (
         f"git add -A .evalops/locks .evalops/store && git commit -m {COMMIT_MESSAGE!r} && git push origin HEAD:{branch}"
@@ -174,21 +220,26 @@ def _plan_main(ctx: _Context) -> Generator[_Step, None, None]:
 
 
 def _plan_release(ctx: _Context) -> Generator[_Step, None, None]:
+    """Re-verify now (guard + a fresh gate + the current baseline) before moving ``production``.
+
+    The gate step re-aggregates the group from the ledger and applies today's rules, so a stale
+    ``EVIDENCE_GROUP`` (a tag that says "passed" but does not pass anymore) stops the stage here.
+    """
     group = ctx.evidence_group or EVIDENCE_PLACEHOLDER
+    yield _ev("guard", ["guard"])
+    yield _ev("gate", ["gate", "--group", group])
+    yield _ev("baseline", ["baseline"])
     yield _ev("promote", ["promote", "--alias", "production", "--evidence-group", group])
     yield _commit_state_step(ctx)
 
 
 def _plan_nightly(ctx: _Context) -> Generator[_Step, None, None]:
-    yield _ev("baseline", ["baseline"])
+    yield _ev("baseline", ["baseline"], writes_baseline=True)
     sha = BASELINE_PLACEHOLDER if ctx.dry_run else ctx.baseline_sha
+    control = ["eval", "--dataset", ctx.golden, "--stage", "control"]
     if not ctx.dry_run and not sha:
-        yield _ev(
-            "control",
-            ["eval", "--dataset", ctx.golden, "--stage", "control"],
-            run=False,
-            reason="no baseline git_sha; skipping the control run (nothing to compare against)",
-        )
+        # WP2.2 (D1): a nightly run with no production baseline is a failure, not a skip.
+        yield _refused("control", control, EXIT_GATE_FAILED, NO_BASELINE_MESSAGE)
         return
     original = REF_PLACEHOLDER if ctx.dry_run else _current_ref(ctx.cfg.root)
     checkout = ["git", "-c", "advice.detachedHead=false", "checkout", "-q", sha]
@@ -198,7 +249,7 @@ def _plan_nightly(ctx: _Context) -> Generator[_Step, None, None]:
         command=f"git checkout -q {original}",
     )
     yield _vcs("checkout", checkout, command=f"git checkout -q {sha}", undo=restore)
-    yield _ev("eval", ["eval", "--dataset", ctx.golden, "--stage", "control"])
+    yield _ev("eval", control, reason=NO_BASELINE_NOTE if ctx.dry_run else None)
     yield _ev("gate", ["gate", "--label", "drift"])
     yield restore
 
@@ -228,6 +279,7 @@ def run_pipeline(cfg: Any, stage: str, *, dry_run: bool = False, as_json: bool =
         calibration=os.getenv("CALIBRATION_DATASET") or "judge_calibration",
         evidence_group=os.getenv("EVIDENCE_GROUP") or None,
         branch=(branch_env or DEFAULT_BRANCH) if stage in ("main", "release") else branch_env,
+        pr=(os.getenv("EVALOPS_PR") or "").strip() or None,
     )
     if stage == "release" and not dry_run and not ctx.evidence_group:
         # The bash `: "${EVIDENCE_GROUP:?...}"` check runs before any step: nothing executed.
@@ -251,6 +303,15 @@ def run_pipeline(cfg: Any, stage: str, *, dry_run: bool = False, as_json: bool =
                     if not as_json:
                         print(f"[{stage}] {step.name}: {step.text()}")
                     continue
+                if step.fail_code is not None:
+                    entry = _refused_entry(step)
+                    steps.append(entry)
+                    if not as_json:
+                        print(f"[{stage}] {step.name} ... exit {step.fail_code}")
+                    # Same envelope shape as a failed nested step: stage + step + the nested reason.
+                    ctx.error_detail = str(step.reason or "")
+                    failure = _stage_error(ctx, steps, EvalOpsError(_step_detail(ctx, entry), step.fail_code))
+                    break
                 if not step.run:
                     steps.append(_skipped_entry(step))
                     if not as_json:
@@ -331,7 +392,14 @@ def _planned_entry(step: _Step) -> dict[str, Any]:
     }
     if not step.run:
         entry["reason"] = step.reason
+    if step.reason and step.run:  # a note on the dry-run listing (the nightly no-baseline path)
+        entry["reason"] = step.reason
     return entry
+
+
+def _refused_entry(step: _Step) -> dict[str, Any]:
+    """A step the stage refused to run: recorded as failed with its code and an actionable reason."""
+    return {**_base_entry(step), "code": step.fail_code, "ok": False, "reason": step.reason}
 
 
 def _skipped_entry(step: _Step) -> dict[str, Any]:
@@ -373,7 +441,7 @@ def _execute(ctx: _Context, step: _Step) -> dict[str, Any]:
 def _execute_evalops(ctx: _Context, step: _Step) -> dict[str, Any]:
     nested = _run_nested(str(ctx.cfg.source) if ctx.cfg.source else None, step.argv or [])
     _append_log(ctx.cfg, nested)
-    if step.name == "baseline":
+    if step.name == "baseline" and step.writes_baseline:  # release records only: no file write
         _write_baseline(ctx, nested)
     entry = {**_base_entry(step), "code": int(nested["code"]), "ok": bool(nested["ok"])}
     if not entry["ok"]:
@@ -385,8 +453,10 @@ def _execute_evalops(ctx: _Context, step: _Step) -> dict[str, Any]:
 def _execute_vcs(ctx: _Context, step: _Step) -> dict[str, Any]:
     entry = _base_entry(step)
     if step.name == "commit_state":
-        committed = _commit_state(ctx.cfg, ctx.branch)
+        committed = _commit_state(ctx.cfg, ctx.branch, ctx.pr)
         entry.update({"code": EXIT_OK, "ok": True, "committed": committed})
+        if ctx.pr:
+            entry["bot_branch"] = _bot_branch(ctx.pr)
         return entry
     code, _, stderr = _git(ctx.cfg.root, step.argv or [])
     if code != EXIT_OK:
@@ -478,12 +548,15 @@ def _git_checked(root: Any, argv: list[str]) -> None:
         raise EvalOpsError(f"git {argv[1] if len(argv) > 1 else ''} failed: {detail}", EXIT_RUNTIME)
 
 
-def _commit_state(cfg: Any, branch: str | None) -> bool:
+def _commit_state(cfg: Any, branch: str | None, pr: str | None = None) -> bool:
     """Commit + push versioned state; returns ``committed``; no-op when nothing is staged.
 
     Mirrors the bash helper: `git add ... || true` (missing/ignored paths are not an error), then
     `git diff --cached --quiet` for the no-op, then the ``EVALOPS_BRANCH`` guard, then bot identity,
-    commit and ``git push origin HEAD:<branch>``.
+    commit and ``git push origin HEAD:<branch>``. With ``EVALOPS_PR`` set the push goes to the bot
+    branch ``evalops/state/pr-<N>`` with ``--force`` instead (derived state: the latest run wins, so
+    a previous run's commit can never wedge a later run of the same PR); a source branch is then
+    neither required nor touched.
     """
     _git(cfg.root, ["git", "add", "-A", ".evalops/locks", ".evalops/store"])
     code, _, stderr = _git(cfg.root, ["git", "diff", "--cached", "--quiet"])
@@ -491,12 +564,15 @@ def _commit_state(cfg: Any, branch: str | None) -> bool:
         return False
     if code != 1:
         raise EvalOpsError(f"git diff --cached failed: {stderr.strip()}", EXIT_RUNTIME)
-    if not branch:
+    if not branch and not pr:
         raise EvalOpsError(NO_BRANCH_MESSAGE, EXIT_GUARD)
     _git_checked(cfg.root, ["git", "config", "user.name", os.getenv("GIT_BOT_NAME") or DEFAULT_GIT_NAME])
     _git_checked(cfg.root, ["git", "config", "user.email", os.getenv("GIT_BOT_EMAIL") or DEFAULT_GIT_EMAIL])
     _git_checked(cfg.root, ["git", "commit", "-m", COMMIT_MESSAGE])
-    _git_checked(cfg.root, ["git", "push", "origin", f"HEAD:{branch}"])
+    if pr:
+        _git_checked(cfg.root, ["git", "push", "--force", "origin", f"HEAD:refs/heads/{_bot_branch(pr)}"])
+    else:
+        _git_checked(cfg.root, ["git", "push", "origin", f"HEAD:{branch}"])
     return True
 
 
