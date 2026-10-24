@@ -220,7 +220,9 @@ def dispatch(args, cfg) -> dict:
             # Versioned read: a future schema_version is exit 7, not a raw json.loads crash or misread.
             group = formats.read_versioned(last)["group"] if last.exists() else None
         if not group:
-            raise EvalOpsError("no --group and no last_eval.json")
+            # No --group and no last_eval.json is a usage error (exit 2), the same verdict
+            # `gate.run_gate` gives for the same situation: the caller named no group.
+            raise EvalOpsError("no --group and no last_eval.json", EXIT_USAGE)
         return run.show_traces(cfg, group, args.row)
     if args.cmd == "gate":
         return gate.run_gate(cfg, args.group, args.label)
