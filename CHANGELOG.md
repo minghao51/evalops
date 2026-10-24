@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- `.env.example`: every environment variable evalops reads in one templated file — core
+  (`EVALOPS_ENV`, `EVALOPS_ACTOR`, `EVALOPS_CONFIG`), the ledger URL override consumed by the
+  shipped yaml's `${VAR:-default}` interpolation, the `EVALOPS_REDACT` safety override, the CI
+  pipeline variables, and the contract-test/golden-regen knobs. `.env` is gitignored; backend
+  credentials belong in the environment, never in the committed yaml.
 - **WP1.4 test debt (2026-10-24):** 53 tests (193 → 246) covering every `gate.check` rule branch
   (incl. the vacuous-gate and zero-baseline guards), `gate.reliability`/`ci_lower`/`check_rows`,
   cassette record/replay/miss/save/corruption/key-stability, `calibrate._stats` (perfect/chance/

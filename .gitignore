@@ -2,6 +2,11 @@
 .evalops/*
 !.evalops/locks/
 !.evalops/store/
+
+# local environment files (template: .env.example) — never commit real credentials
+.env
+.env.*
+!.env.example
 *.egg-info/
 __pycache__/
 *.py[cod]

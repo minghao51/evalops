@@ -66,6 +66,10 @@ docker compose -f tests/contract/docker-compose.yml down -v
 
 Fresh clone: `uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"`.
 
+Every environment variable evalops reads is templated in `.env.example` (core, ledger URL, redaction
+override, CI pipeline vars, contract-test target); evalops reads the process environment only — it
+never loads `.env` itself, and `.env` is gitignored.
+
 ## 4. How work is dispatched here (proven protocol)
 
 Three agents, defined in `.pi/agents/` (project scope, symlinked at the session root `.pi`):
