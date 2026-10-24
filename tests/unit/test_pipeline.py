@@ -19,6 +19,7 @@ import os
 import pathlib
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 
@@ -628,6 +629,11 @@ def test_nested_steps_load_the_same_config_file_the_pipeline_was_given():
 
 def test_bash_shim_delegates_to_the_pipeline_command():
     shim = proj.REPO / "ci" / "pipeline.sh"
+    # adapters invoke `ci/pipeline.sh pr` directly, so the shim must carry the executable bit
+    assert shim.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH) == (
+        stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    ), "ci/pipeline.sh must be executable for direct invocation"
+    assert os.access(shim, os.X_OK), "ci/pipeline.sh must be executable for direct invocation"
     root = proj.pipeline_project(_config(), datasets={"golden_regression": GOLDEN})
     try:
         venv_bin = str(proj.REPO / ".venv" / "bin")
