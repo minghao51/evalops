@@ -4,10 +4,11 @@ Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 0 (bedrock) — G0 accepted, WP0.3/0.4/0.5 done; WP0.6 pending the first CI run.
-- **Tests:** 125 green (`make check`), 17 at baseline.
-- **Gates passed:** G0 (contract, formats, tooling) — with two tracked compromises below.
-- **Next:** phase 1 — WP1.1 redaction, WP1.2 ledger integrity, WP1.3 statistics.
+- **Phase:** 0 complete — G0 accepted, all WPs 0.0–0.6 done.
+- **Tests:** 125 green (`make check`), 17 at baseline. **CI:** py3.10/3.11/3.12 green on `main`
+  (run `40047473262`).
+- **Repo:** https://github.com/minghao51/evalops (public).
+- **Next:** phase 1 — WP1.1 redaction (blocker for real data), WP1.3 statistics in parallel.
 
 ## Work packages
 
@@ -19,19 +20,17 @@ Updated: 2026-10-23 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 0.4 versioned formats + semantic fingerprints | done | `6280873` |
 | 0.3 typed config (pydantic) + JSON schema | done | `f0da4ce` |
 | 0.5 envelope freeze + exit-code goldens | done | `7d7d8f1` |
-| 0.6 STATE/CHANGELOG + first real CI run | in progress (docs done, CI pending push) | `649f151` |
+| 0.6 STATE/CHANGELOG + first real CI run | done | `022be67` + run `40047473262` |
 
 ## Known compromises (tracked, not forgotten)
 
-1. **CI matrix never ran.** `.github/workflows/ci.yml` targets 3.10–3.12; only 3.12 has been executed
-   locally. Addressed in WP0.6 (needs the first push).
-2. **`src/` is not format-enforced.** `make check` runs `ruff format --check tests` only; `src/` is
+1. **`src/` is not format-enforced.** `make check` runs `ruff format --check tests` only; `src/` is
    `ruff check`-clean. Remove the scope restriction in WP1.1 once `src/` is quiet.
-3. **Vendor plugins remain unverified.** Every `VERIFY` marker in `plugins/` is a phase 3 contract
+2. **Vendor plugins remain unverified.** Every `VERIFY` marker in `plugins/` is a phase 3 contract
    test, not a claim. The `logfire` usage lookup (private SQL) is the highest risk.
-4. **No redaction.** Traces, rows, cassettes and artifacts store payloads verbatim (length-clipped
+3. **No redaction.** Traces, rows, cassettes and artifacts store payloads verbatim (length-clipped
    only). WP1.1 is the fix; do not use evalops on real PII data before then.
-5. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
+4. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
    product (Deixic, Inc.). Import name stays `evalops`; distribution name is decided in WP6.1
    (`evalplane` and `agentgates` are free). See ADR 0001.
 

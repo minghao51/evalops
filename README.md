@@ -1,6 +1,12 @@
 # evalops
 
+[![ci](https://github.com/minghao51/evalops/actions/workflows/ci.yml/badge.svg)](https://github.com/minghao51/evalops/actions/workflows/ci.yml)
+
 evalops is a backend-agnostic tool for versioning, evaluation, gating, and cost control of LLM apps **and agents**.
+
+> Status: phase 0 complete (contract, typed config, versioned formats, frozen `--json` envelope).
+> Phase 1 (redaction, statistics, ledger integrity) is next — see [`HANDOFF.md`](HANDOFF.md) and
+> [`docs/IMPLEMENTATION_MAP.md`](docs/IMPLEMENTATION_MAP.md).
 
 - **Backends:** MLflow (local or Databricks), Langfuse, LangSmith, Logfire, plain git + SQL, or your own plugin.
 - **Runs under:** GitHub, GitLab, Azure DevOps, Jenkins, Databricks jobs, cron, or by hand.

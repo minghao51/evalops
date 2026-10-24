@@ -196,19 +196,26 @@ family; at most two parallel workers in disjoint trees.
 
 ## 6. WP state
 
+Repo: https://github.com/minghao51/evalops (public). CI: GitHub Actions matrix 3.10/3.11/3.12.
+
 | WP | State | Evidence |
 |---|---|---|
-| 0.0 | done | baseline import commit `0a538e2` |
+| 0.0 | done | baseline import `0a538e2`, agents + map `16ce2e1` |
 | 0.1 | done | `docs/CONTRACT.md`, ADRs 0001–0007; reviewed |
 | 0.2 | done | `tests/{unit,integration}`, recursive runner, ruff/mypy/CI, no-vendor AST guard; reviewed |
 | 0.3 | done | pydantic config package, generated schema, `evalops config`; reviewed |
 | 0.4 | done | `evalops.contract.formats`, v0 read-compat, semantic fingerprints, exit 7; reviewed |
 | 0.5 | done | `src/evalops/envelope.py`, arg/YAML error envelopes, fd-level stdout capture, 17 goldens, exit matrix 0–7; reviewed |
-| 0.6 | in progress | `docs/STATE.md` + `CHANGELOG.md` done; first CI run pending a push |
+| 0.6 | done | `docs/STATE.md`, `CHANGELOG.md`, first CI run |
+
+**G0 closed.** CI run `40047473262` on `main`: py3.10 / 3.11 / 3.12 all green.
+
+**Next:** phase 1 — WP1.1 redaction (blocker for real data), WP1.3 statistics (parallel), then
+WP1.2 ledger integrity, WP1.4 test debt, WP1.5 trace model v2.
 
 **Next increment:** phase 1 (WP1.1 redaction, WP1.2 ledger integrity, WP1.3 statistics) — the typed
-config and frozen envelope it depends on are now in place. WP0.6 closes when the repo first runs
-its GitHub Actions matrix (needs a push, which requires explicit approval).
+config and frozen envelope it depends on are now in place. Start with WP1.1: evalops currently
+persists traces, rows, cassettes and artifacts verbatim, so it must not be used on real data yet.
 
 ### Phase 0 delivered
 
