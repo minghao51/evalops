@@ -1,0 +1,534 @@
+"""Declarative CI stages: ``evalops pipeline <pr|main|release|nightly>``.
+
+``ci/pipeline.sh`` used to own this logic; it is now a shim that ``exec``s this command, so the
+stage table is data a human can read and a test can assert instead of bash. Nested evalops commands
+run **in-process** through the CLI dispatch/capture helpers (no console script on PATH, no child
+``evalops``), and only the git actions are subprocesses.
+
+Stages (normative, same order and flags as the bash script):
+
+  pr      guard -> sync all -> commit_state -> [calibrate] -> plan(smoke, pr) -> eval(smoke, pr) -> gate
+  main    guard -> sync all --check -> [calibrate] -> plan(golden, main) -> eval(golden, main) -> gate
+          -> read group from last_eval.json -> promote --alias candidate -> commit_state
+  release require EVIDENCE_GROUP -> promote --alias production -> commit_state
+  nightly baseline -> [checkout baseline git_sha -> eval(golden, control) -> gate --label drift]
+          -> restore the original ref in a ``finally``
+
+``calibrate`` runs only when ``datasets/<CALIBRATION_DATASET>.jsonl`` exists. ``EVALOPS_BRANCH``
+defaults to ``main`` for the ``main``/``release`` state commits (``pr`` has no default, exactly like
+the bash ``:=`` behaviour), and ``EVALOPS_ACTOR`` defaults to ``ci`` before the first step.
+
+Exit codes are never collapsed: a failed step propagates its own code (1 gate, 2 usage, 3 budget,
+4 guard, 5 runtime, 6 capability, 7 contract) through an ``EvalOpsError`` that carries ``data``, so
+the failure envelope keeps ``data.steps`` and names the stage and step in ``errors[0].message``.
+
+``--dry-run`` exits 0 and writes nothing (no file, no log, no git state): it lists exactly the
+steps the real run would execute, with placeholders for values only a real run knows (``<group from
+last_eval.json>``, ``<EVIDENCE_GROUP>``, ``<baseline git_sha>``, ``<original ref>``). Conditional
+steps are listed with ``run: false`` and a ``reason``. The nightly ``restore`` step carries an extra
+``details: {ref, head}`` read back from git *after* it ran, so a test can prove the restore executed
+instead of trusting the step's own ``ok``.
+
+Every nested evalops step's envelope is appended as one JSON line to ``.evalops/out/ci_log.jsonl``
+(the bash ``ev ... | tee``); git actions are not envelopes and appear only in ``data.steps``. The
+command's own ``--json`` stdout is exactly one envelope: nested output and hooks go to stderr.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from collections.abc import Generator
+from dataclasses import dataclass, field
+from typing import Any
+
+from .contract import formats
+from .util import EXIT_GUARD, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError
+
+#: The stages this command accepts, in the order the CLI help lists them.
+STAGES = ("pr", "main", "release", "nightly")
+
+COMMIT_MESSAGE = "chore(evalops): update versioned state [skip ci]"
+NO_BRANCH_MESSAGE = "evalops state changed but EVALOPS_BRANCH is unset; commit .evalops/locks and .evalops/store"
+DEFAULT_BRANCH = "main"
+DEFAULT_GIT_NAME = "evalops-bot"
+DEFAULT_GIT_EMAIL = "evalops-bot@users.noreply.local"
+
+GROUP_PLACEHOLDER = "<group from last_eval.json>"
+EVIDENCE_PLACEHOLDER = "<EVIDENCE_GROUP>"
+BASELINE_PLACEHOLDER = "<baseline git_sha>"
+REF_PLACEHOLDER = "<original ref>"
+BRANCH_PLACEHOLDER = "<EVALOPS_BRANCH>"
+
+EVALOPS = "evalops"
+VCS = "vcs"
+SKIP = "skip"
+
+
+class _StageError(EvalOpsError):
+    """A stage failure that carries ``data.steps`` into the failure envelope.
+
+    Same pattern as ``cli._ReportError``: ``cli._error_envelope`` copies ``.data`` into the envelope,
+    so a reviewer still sees every step that ran before the one that failed.
+    """
+
+    def __init__(self, message: str, code: int, data: dict[str, Any]):
+        super().__init__(message, code)
+        self.data = data
+
+
+@dataclass
+class _Step:
+    """One stage action: a nested evalops command, a git action, or a skipped conditional."""
+
+    name: str
+    kind: str
+    argv: list[str] | None = None
+    run: bool = True
+    reason: str | None = None
+    command: str | None = None
+    undo: _Step | None = None
+
+    def text(self) -> str:
+        if self.command:
+            return self.command
+        return f"{EVALOPS} {' '.join(self.argv or [])}".strip()
+
+
+@dataclass
+class _Context:
+    """Per-run state: env-derived defaults plus values only a real run can resolve."""
+
+    cfg: Any
+    stage: str
+    dry_run: bool
+    smoke: str
+    golden: str
+    calibration: str
+    evidence_group: str | None
+    branch: str | None
+    baseline_sha: str = ""
+    pending_undo: list[_Step] = field(default_factory=list)
+    error_detail: str = ""
+
+    def calibration_present(self) -> bool:
+        return (self.cfg.path("datasets") / f"{self.calibration}.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
+# stage table
+# ---------------------------------------------------------------------------
+def _ev(name: str, argv: list[str], *, run: bool = True, reason: str | None = None) -> _Step:
+    kind = EVALOPS if run else SKIP
+    return _Step(name=name, kind=kind, argv=argv, run=run, reason=reason)
+
+
+def _vcs(name: str, argv: list[str] | None, *, command: str, undo: _Step | None = None) -> _Step:
+    return _Step(name=name, kind=VCS, argv=argv, command=command, undo=undo)
+
+
+def _calibrate_step(ctx: _Context) -> _Step:
+    argv = ["calibrate", "--dataset", ctx.calibration]
+    if ctx.calibration_present():
+        return _ev("calibrate", argv)
+    return _ev(
+        "calibrate",
+        argv,
+        run=False,
+        reason=f"datasets/{ctx.calibration}.jsonl not found",
+    )
+
+
+def _commit_state_step(ctx: _Context) -> _Step:
+    """The bash ``commit_state``: stage state, no-op when clean, commit+push when a branch is known."""
+    branch = ctx.branch or BRANCH_PLACEHOLDER
+    command = (
+        f"git add -A .evalops/locks .evalops/store && git commit -m {COMMIT_MESSAGE!r} && git push origin HEAD:{branch}"
+    )
+    return _vcs("commit_state", None, command=command)
+
+
+def _plan_pr(ctx: _Context) -> Generator[_Step, None, None]:
+    yield _ev("guard", ["guard"])
+    yield _ev("sync", ["sync", "all"])
+    yield _commit_state_step(ctx)
+    yield _calibrate_step(ctx)
+    yield _ev("plan", ["plan", "--dataset", ctx.smoke, "--stage", "pr"])
+    yield _ev("eval", ["eval", "--dataset", ctx.smoke, "--stage", "pr"])
+    yield _ev("gate", ["gate"])
+
+
+def _plan_main(ctx: _Context) -> Generator[_Step, None, None]:
+    yield _ev("guard", ["guard"])
+    yield _ev("sync", ["sync", "all", "--check"])
+    yield _calibrate_step(ctx)
+    yield _ev("plan", ["plan", "--dataset", ctx.golden, "--stage", "main"])
+    yield _ev("eval", ["eval", "--dataset", ctx.golden, "--stage", "main"])
+    yield _ev("gate", ["gate"])
+    group = GROUP_PLACEHOLDER if ctx.dry_run else _last_eval_group(ctx)
+    if not ctx.dry_run:
+        ctx.evidence_group = group
+    yield _ev("promote", ["promote", "--alias", "candidate", "--evidence-group", group])
+    yield _commit_state_step(ctx)
+
+
+def _plan_release(ctx: _Context) -> Generator[_Step, None, None]:
+    group = ctx.evidence_group or EVIDENCE_PLACEHOLDER
+    yield _ev("promote", ["promote", "--alias", "production", "--evidence-group", group])
+    yield _commit_state_step(ctx)
+
+
+def _plan_nightly(ctx: _Context) -> Generator[_Step, None, None]:
+    yield _ev("baseline", ["baseline"])
+    sha = BASELINE_PLACEHOLDER if ctx.dry_run else ctx.baseline_sha
+    if not ctx.dry_run and not sha:
+        yield _ev(
+            "control",
+            ["eval", "--dataset", ctx.golden, "--stage", "control"],
+            run=False,
+            reason="no baseline git_sha; skipping the control run (nothing to compare against)",
+        )
+        return
+    original = REF_PLACEHOLDER if ctx.dry_run else _current_ref(ctx.cfg.root)
+    checkout = ["git", "-c", "advice.detachedHead=false", "checkout", "-q", sha]
+    restore = _vcs(
+        "restore",
+        ["git", "checkout", "-q", original],
+        command=f"git checkout -q {original}",
+    )
+    yield _vcs("checkout", checkout, command=f"git checkout -q {sha}", undo=restore)
+    yield _ev("eval", ["eval", "--dataset", ctx.golden, "--stage", "control"])
+    yield _ev("gate", ["gate", "--label", "drift"])
+    yield restore
+
+
+_PLANS = {
+    "pr": _plan_pr,
+    "main": _plan_main,
+    "release": _plan_release,
+    "nightly": _plan_nightly,
+}
+
+
+# ---------------------------------------------------------------------------
+# entry point
+# ---------------------------------------------------------------------------
+def run_pipeline(cfg: Any, stage: str, *, dry_run: bool = False, as_json: bool = True) -> dict[str, Any]:
+    """Run one CI stage; returns the command's ``data`` or raises ``_StageError`` with ``data.steps``."""
+    if stage not in STAGES:
+        raise EvalOpsError(f"unknown stage {stage!r}; choose one of {STAGES}", EXIT_USAGE)
+    branch_env = os.getenv("EVALOPS_BRANCH") or None
+    ctx = _Context(
+        cfg=cfg,
+        stage=stage,
+        dry_run=dry_run,
+        smoke=os.getenv("SMOKE_DATASET") or "smoke",
+        golden=os.getenv("GOLDEN_DATASET") or "golden_regression",
+        calibration=os.getenv("CALIBRATION_DATASET") or "judge_calibration",
+        evidence_group=os.getenv("EVIDENCE_GROUP") or None,
+        branch=(branch_env or DEFAULT_BRANCH) if stage in ("main", "release") else branch_env,
+    )
+    if stage == "release" and not dry_run and not ctx.evidence_group:
+        # The bash `: "${EVIDENCE_GROUP:?...}"` check runs before any step: nothing executed.
+        raise _StageError(
+            "pipeline release requires EVIDENCE_GROUP (the main-stage evidence group id)",
+            EXIT_USAGE,
+            {"stage": stage, "dry_run": False, "steps": [], "summary": "release stage failed: EVIDENCE_GROUP is unset"},
+        )
+    if not dry_run:
+        # The bash `export EVALOPS_ACTOR="${EVALOPS_ACTOR:-ci}"`: a real run tags its runs `ci`.
+        os.environ.setdefault("EVALOPS_ACTOR", "ci")
+
+    steps: list[dict[str, Any]] = []
+    failure: EvalOpsError | None = None
+    plan = _PLANS[stage](ctx)
+    try:
+        try:
+            for step in plan:
+                if dry_run:
+                    steps.append(_planned_entry(step))
+                    if not as_json:
+                        print(f"[{stage}] {step.name}: {step.text()}")
+                    continue
+                if not step.run:
+                    steps.append(_skipped_entry(step))
+                    if not as_json:
+                        print(f"[{stage}] {step.name} ... skipped ({step.reason})")
+                    continue
+                try:
+                    entry = _execute(ctx, step)
+                except EvalOpsError as exc:  # commit_state without a branch, a git failure, ...
+                    steps.append(_failed_entry(ctx, step, exc))
+                    if not as_json:
+                        print(f"[{stage}] {step.name} ... exit {exc.code}")
+                    message = f"pipeline {stage} step '{step.name}' failed with exit code {exc.code}: {exc}"
+                    failure = _stage_error(ctx, steps, EvalOpsError(message, exc.code))
+                    break
+                steps.append(entry)
+                if not as_json:
+                    print(f"[{stage}] {step.name} ... {'ok' if entry['ok'] else 'exit ' + str(entry['code'])}")
+                if not entry["ok"]:
+                    failure = _stage_error(ctx, steps, EvalOpsError(_step_detail(ctx, entry), int(entry["code"])))
+                    break
+        except EvalOpsError as exc:  # raised between steps (e.g. a v2 last_eval.json: exit 7)
+            failure = _stage_error(ctx, steps, exc)
+    finally:
+        plan.close()
+        if not dry_run and ctx.pending_undo:
+            undo_failure = _drain_undo(ctx, steps)
+            if failure is None:
+                failure = undo_failure
+
+    if dry_run:
+        return {
+            "stage": stage,
+            "dry_run": True,
+            "steps": steps,
+            "summary": f"dry run: {len(steps)} step(s) for {stage}",
+        }
+    if failure is not None:
+        raise failure
+    data: dict[str, Any] = {
+        "stage": stage,
+        "dry_run": False,
+        "steps": steps,
+        "summary": f"{stage} stage passed: {len(steps)} step(s)",
+    }
+    if stage in ("main", "release") and ctx.evidence_group:
+        data["evidence_group"] = ctx.evidence_group
+        if not as_json:
+            print(f"[{stage}] evidence group: {ctx.evidence_group}")
+    if stage == "nightly" and ctx.baseline_sha:
+        data["baseline_git_sha"] = ctx.baseline_sha
+    return data
+
+
+def _stage_error(ctx: _Context, steps: list[dict[str, Any]], exc: EvalOpsError) -> _StageError:
+    data: dict[str, Any] = {
+        "stage": ctx.stage,
+        "dry_run": False,
+        "steps": steps,
+        "summary": f"{ctx.stage} stage failed: {exc}",
+    }
+    if ctx.evidence_group and ctx.stage in ("main", "release"):
+        data["evidence_group"] = ctx.evidence_group
+    if ctx.stage == "nightly" and ctx.baseline_sha:
+        data["baseline_git_sha"] = ctx.baseline_sha
+    return _StageError(str(exc), exc.code, data)
+
+
+# ---------------------------------------------------------------------------
+# step payloads
+# ---------------------------------------------------------------------------
+def _planned_entry(step: _Step) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "name": step.name,
+        "kind": step.kind,
+        "command": step.text(),
+        "argv": step.argv,
+        "run": step.run,
+    }
+    if not step.run:
+        entry["reason"] = step.reason
+    return entry
+
+
+def _skipped_entry(step: _Step) -> dict[str, Any]:
+    return {
+        "name": step.name,
+        "kind": SKIP,
+        "command": step.text(),
+        "argv": step.argv,
+        "skipped": True,
+        "reason": step.reason,
+    }
+
+
+def _base_entry(step: _Step) -> dict[str, Any]:
+    return {"name": step.name, "kind": step.kind, "command": step.text(), "argv": step.argv}
+
+
+def _failed_entry(ctx: _Context, step: _Step, exc: EvalOpsError) -> dict[str, Any]:
+    return {**_base_entry(step), "code": exc.code, "ok": False}
+
+
+def _step_detail(ctx: _Context, entry: dict[str, Any]) -> str:
+    """`errors[0].message` names the stage, the step and (when it has one) the nested reason."""
+    message = f"pipeline {ctx.stage} step '{entry['name']}' failed with exit code {entry['code']}"
+    return f"{message}: {ctx.error_detail}" if ctx.error_detail else message
+
+
+# ---------------------------------------------------------------------------
+# executing one step
+# ---------------------------------------------------------------------------
+def _execute(ctx: _Context, step: _Step) -> dict[str, Any]:
+    if step.kind == EVALOPS:
+        return _execute_evalops(ctx, step)
+    if step.kind == VCS:
+        return _execute_vcs(ctx, step)
+    raise EvalOpsError(f"unknown step kind {step.kind!r}", EXIT_RUNTIME)
+
+
+def _execute_evalops(ctx: _Context, step: _Step) -> dict[str, Any]:
+    nested = _run_nested(str(ctx.cfg.source) if ctx.cfg.source else None, step.argv or [])
+    _append_log(ctx.cfg, nested)
+    if step.name == "baseline":
+        _write_baseline(ctx, nested)
+    entry = {**_base_entry(step), "code": int(nested["code"]), "ok": bool(nested["ok"])}
+    if not entry["ok"]:
+        errors = nested.get("errors") or [{}]
+        ctx.error_detail = str(errors[0].get("message") or "")
+    return entry
+
+
+def _execute_vcs(ctx: _Context, step: _Step) -> dict[str, Any]:
+    entry = _base_entry(step)
+    if step.name == "commit_state":
+        committed = _commit_state(ctx.cfg, ctx.branch)
+        entry.update({"code": EXIT_OK, "ok": True, "committed": committed})
+        return entry
+    code, _, stderr = _git(ctx.cfg.root, step.argv or [])
+    if code != EXIT_OK:
+        # git's own exit code (128 for a bad ref) is not in the evalops matrix: a git failure is
+        # EXIT_RUNTIME, exactly like `_git_checked`, so the failure envelope can carry `data.steps`.
+        detail = stderr.strip() or f"exit {code}"
+        raise EvalOpsError(f"git failed: {detail}", EXIT_RUNTIME)
+    entry.update({"code": code, "ok": True})
+    if step.name == "restore":
+        # Proof the restore really ran: the ref/HEAD **after** the git call, not the plan's argv.
+        entry["details"] = _ref_state(ctx.cfg.root)
+    if step.undo is not None:
+        ctx.pending_undo.append(step.undo)
+    if step.name == "restore" and ctx.pending_undo:
+        ctx.pending_undo.pop()
+    return entry
+
+
+def _drain_undo(ctx: _Context, steps: list[dict[str, Any]]) -> _StageError | None:
+    """Run every pending undo action (the nightly ref restore) even when the stage failed."""
+    failure: _StageError | None = None
+    while ctx.pending_undo:
+        step = ctx.pending_undo.pop()
+        code, _, stderr = _git(ctx.cfg.root, step.argv or [])
+        entry = {**_base_entry(step), "code": code if code == EXIT_OK else EXIT_RUNTIME, "ok": code == EXIT_OK}
+        if code == EXIT_OK:
+            entry["details"] = _ref_state(ctx.cfg.root)
+        steps.append(entry)
+        if code != EXIT_OK and failure is None:
+            failure = _stage_error(
+                ctx,
+                steps,
+                EvalOpsError(f"git restore failed: {stderr.strip()}", EXIT_RUNTIME),
+            )
+    return failure
+
+
+def _run_nested(source: str | None, argv: list[str]) -> dict[str, Any]:
+    """Run one evalops command in-process, exactly as the CLI would run it.
+
+    The config is reloaded per step from the same file the pipeline was given (``cli.main`` loads
+    it per process), so the nightly control run sees the config of the checked-out baseline ref,
+    not the ref the pipeline started on.
+    """
+    from . import cli
+    from . import config as config_mod
+    from .contract import redact
+
+    nested_cfg = config_mod.load(source)
+    redact.activate(nested_cfg)
+    args = cli.build_parser().parse_args([cli.JSON_FLAG, *argv])
+    captured, nested = cli._captured_stdout(lambda: cli._dispatch_envelope(args, nested_cfg))
+    cli._forward_to_stderr(captured)
+    return nested
+
+
+def _append_log(cfg: Any, nested: dict[str, Any]) -> None:
+    path = _out_path(cfg, "ci_log.jsonl")
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(nested, default=str) + "\n")
+
+
+def _write_baseline(ctx: _Context, nested: dict[str, Any]) -> None:
+    # Exactly what `evalops --json baseline > .evalops/out/baseline.json` writes: the envelope.
+    path = _out_path(ctx.cfg, "baseline.json")
+    path.write_text(json.dumps(nested, indent=2, default=str) + "\n", encoding="utf-8")
+    baseline = nested.get("data", {}).get("baseline") or {}
+    ctx.baseline_sha = str(baseline.get("git_sha") or "")
+
+
+def _out_path(cfg: Any, name: str) -> Any:
+    d = cfg.lock_dir / "out"  # lock_dir creates .evalops; only a real run ever gets here
+    d.mkdir(parents=True, exist_ok=True)
+    return d / name
+
+
+# ---------------------------------------------------------------------------
+# git actions (subprocesses only here)
+# ---------------------------------------------------------------------------
+def _git(root: Any, argv: list[str]) -> tuple[int, str, str]:
+    proc = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _git_checked(root: Any, argv: list[str]) -> None:
+    code, stdout, stderr = _git(root, argv)
+    if code != EXIT_OK:
+        detail = stderr.strip() or stdout.strip() or f"exit {code}"
+        raise EvalOpsError(f"git {argv[1] if len(argv) > 1 else ''} failed: {detail}", EXIT_RUNTIME)
+
+
+def _commit_state(cfg: Any, branch: str | None) -> bool:
+    """Commit + push versioned state; returns ``committed``; no-op when nothing is staged.
+
+    Mirrors the bash helper: `git add ... || true` (missing/ignored paths are not an error), then
+    `git diff --cached --quiet` for the no-op, then the ``EVALOPS_BRANCH`` guard, then bot identity,
+    commit and ``git push origin HEAD:<branch>``.
+    """
+    _git(cfg.root, ["git", "add", "-A", ".evalops/locks", ".evalops/store"])
+    code, _, stderr = _git(cfg.root, ["git", "diff", "--cached", "--quiet"])
+    if code == 0:
+        return False
+    if code != 1:
+        raise EvalOpsError(f"git diff --cached failed: {stderr.strip()}", EXIT_RUNTIME)
+    if not branch:
+        raise EvalOpsError(NO_BRANCH_MESSAGE, EXIT_GUARD)
+    _git_checked(cfg.root, ["git", "config", "user.name", os.getenv("GIT_BOT_NAME") or DEFAULT_GIT_NAME])
+    _git_checked(cfg.root, ["git", "config", "user.email", os.getenv("GIT_BOT_EMAIL") or DEFAULT_GIT_EMAIL])
+    _git_checked(cfg.root, ["git", "commit", "-m", COMMIT_MESSAGE])
+    _git_checked(cfg.root, ["git", "push", "origin", f"HEAD:{branch}"])
+    return True
+
+
+def _ref_state(root: Any) -> dict[str, str]:
+    """The current branch/ref and HEAD commit, read back from git after a restore executed."""
+    code, stdout, _ = _git(root, ["git", "symbolic-ref", "-q", "--short", "HEAD"])
+    ref = stdout.strip() if code == EXIT_OK else ""
+    code, stdout, stderr = _git(root, ["git", "rev-parse", "HEAD"])
+    if code != EXIT_OK:
+        raise EvalOpsError(f"git rev-parse HEAD failed: {stderr.strip()}", EXIT_RUNTIME)
+    head = stdout.strip()
+    return {"ref": ref or head, "head": head}
+
+
+def _current_ref(root: Any) -> str:
+    code, stdout, _ = _git(root, ["git", "symbolic-ref", "-q", "--short", "HEAD"])
+    if code == 0 and stdout.strip():
+        return stdout.strip()
+    code, stdout, stderr = _git(root, ["git", "rev-parse", "HEAD"])
+    if code != 0:
+        raise EvalOpsError(f"git rev-parse HEAD failed: {stderr.strip()}", EXIT_RUNTIME)
+    return stdout.strip()
+
+
+# ---------------------------------------------------------------------------
+# last_eval.json hand-off (v1 envelope: `data.baseline.git_sha`, never the legacy top level)
+# ---------------------------------------------------------------------------
+def _last_eval_group(ctx: _Context) -> str:
+    path = ctx.cfg.lock_dir / "out" / "last_eval.json"
+    if not path.exists():
+        raise EvalOpsError("gate wrote no .evalops/out/last_eval.json; cannot read the evidence group", EXIT_RUNTIME)
+    group = formats.read_versioned(path).get("group")
+    if not group:
+        raise EvalOpsError("last_eval.json has no group; cannot promote", EXIT_RUNTIME)
+    return str(group)

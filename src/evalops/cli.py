@@ -60,6 +60,20 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="instantiate every configured plugin and check connectivity")
     sub.add_parser("guard", help="static checks: no bypass of versioning, locks present, frozen data intact")
 
+    pl = sub.add_parser("pipeline", help="run one CI stage: guard, sync, eval, gate, promote, state commit")
+    pl.add_argument("stage", choices=list(_pipeline_stages()))
+    pl.add_argument("--dry-run", action="store_true", help="list the steps without running or writing anything")
+    # The global --json comes *before* the sub-command, which `ci/pipeline.sh pr ...` cannot inject.
+    # SUPPRESS keeps the top-level value when this flag is absent; passing it after the stage
+    # (`ci/pipeline.sh pr --json`) still renders exactly one envelope on stdout.
+    pl.add_argument(
+        "--json",
+        dest="json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="machine-readable output (also accepted after the stage, for the ci/pipeline.sh shim)",
+    )
+
     s = sub.add_parser("sync", help="register changed prompts/datasets in the configured backends")
     s.add_argument("what", choices=["prompts", "datasets", "all"])
     s.add_argument("--check", action="store_true", help="verify only; fail if out of sync")
@@ -187,6 +201,10 @@ def dispatch(args, cfg) -> dict:
         return {"ok": ok, "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'", "roles": report}
     if args.cmd == "guard":
         return guard.run_guard(cfg)
+    if args.cmd == "pipeline":
+        from . import pipeline
+
+        return pipeline.run_pipeline(cfg, args.stage, dry_run=args.dry_run, as_json=args.json)
     if args.cmd == "sync":
         reg, out = Registry(cfg), {}
         if args.what in ("prompts", "all"):
@@ -323,10 +341,16 @@ def _error_envelope(args, cfg, exc: Exception) -> dict[str, Any]:
         data = getattr(exc, "data", None)
         if isinstance(data, dict):
             # A command that returns a structured failure report (ledger verify) keeps it in `data`.
+            # Normalize the code exactly like `envelope.from_error`: a code outside the matrix (git's
+            # 128, 0, a non-int) would make `envelope.failure` raise ValueError, costing the whole
+            # envelope (and `data.steps`) instead of reporting the failure.
+            code = getattr(exc, "code", envelope.EXIT_RUNTIME)
+            if not isinstance(code, int) or code == EXIT_OK or code not in envelope.EXIT_MATRIX:
+                code = envelope.EXIT_RUNTIME
             return envelope.failure(
                 args.cmd,
                 cfg.env,
-                exc.code,
+                code,
                 str(exc),
                 hint=getattr(exc, "hint", None),
                 details=getattr(exc, "details", None),
@@ -356,6 +380,13 @@ def _forward_to_stderr(text: str) -> None:
     if not text.endswith("\n"):
         sys.stderr.write("\n")
     sys.stderr.flush()
+
+
+def _pipeline_stages() -> tuple[str, ...]:
+    """The stage names `pipeline` accepts (one source of truth: the pipeline module's table)."""
+    from .pipeline import STAGES
+
+    return STAGES
 
 
 def _subcommand_names(parser: argparse.ArgumentParser) -> set[str]:

@@ -95,6 +95,38 @@ def project(
     return root
 
 
+def pipeline_project(
+    config: str = BASE_CONFIG, datasets: dict[str, str] | None = None, files: dict[str, str] | None = None
+) -> pathlib.Path:
+    """Like `project`, but with the repo's real .gitignore: locks/store are tracked, `.evalops/out` is not.
+
+    The pipeline's `commit_state` is meaningful only in a repo that versions its state (the bash
+    script commits `.evalops/locks` and `.evalops/store`), and `eval` refuses a dirty tree, so the
+    pipeline tests need exactly the rules this repo ships. `datasets` writes extra dataset files
+    (declare every one of them in the config's `datasets:` block).
+    """
+    root = project(config, files=files)
+    (root / ".gitignore").write_text((REPO / ".gitignore").read_text())
+    for name, text in (datasets or {}).items():
+        (root / "datasets" / f"{name}.jsonl").write_text(text)
+    commit(root, "pipeline: versioned state tracked")
+    return root
+
+
+def bare_origin(root: pathlib.Path) -> pathlib.Path:
+    """A local **bare** repo registered as `origin` (never a remote): state pushes stay offline."""
+    origin = tmpdir("evalops-origin-")
+    git(origin, "init", "--bare", "-q")
+    git(root, "remote", "add", "origin", str(origin))
+    return origin
+
+
+def git_out(root: pathlib.Path, *args: str) -> str:
+    """Stdout of a read-only git command (``rev-parse``, ``status``, ``log``, ...)."""
+    proc = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    return proc.stdout.strip()
+
+
 # ---------------------------------------------------------------------------
 # running the CLI
 # ---------------------------------------------------------------------------

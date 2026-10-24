@@ -95,7 +95,7 @@ On a failure `code` is `1`–`7` (never `0`), and `errors[0]` carries `{code, me
 To switch backends, run `EVALOPS_ENV=mlflow|databricks|langfuse|langsmith|logfire`, install the matching extra (for example `pip install -e ".[langfuse]"`), and run `evalops doctor`.
 
 ## Pipeline
-Every CI system calls `bash ci/pipeline.sh pr|main|release|nightly`. Adapters for GitHub, GitLab, and Azure DevOps are in `ci/`.
+Every CI system calls `evalops pipeline pr|main|release|nightly` (adapters for GitHub, GitLab, and Azure DevOps are in `ci/`). `ci/pipeline.sh` is a thin shim: it forwards every argument to that command, so existing jobs keep working and there is no stage logic in bash. `evalops pipeline <stage> --dry-run` lists every step the real run would execute (with placeholders for values only a real run knows) and writes nothing.
 - **pr:** guard → sync (immutable PR versions) → commit locks → calibrate judges (if `datasets/judge_calibration.jsonl` exists) → plan → eval smoke with tool replay → gate → PR comment
 - **main:** guard → `sync --check` → eval golden ×N → gate → promote `@candidate`
 - **release:** manual approval → promote `@production` with `EVIDENCE_GROUP`. This group becomes the baseline.
