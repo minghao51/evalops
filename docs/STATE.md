@@ -8,9 +8,9 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   re-verification, released-group binding, fork-PR bot branch, nightly loud failure) and WP2.3
   (presets + init + capability matrix) done; remaining: WP2.4 (CI adapters), WP2.5 (calibration
   enforcement), then G2 (tag v0.4.0). Phase 1 is closed (G1).
-- **Verified base:** `86f75fa` (WP2.2); **tests:** 329 green (`make check`). **Postgres contract:**
-  1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on `main` (last completed
-  run: `40095127593`, WP2.2).
+- **Verified base:** `eed5e96` (WP2.2 `86f75fa` + docs); **tests:** 329 green (`make check`).
+  **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
+  `main` (last completed runs: `40095127593` WP2.2 feature, `40095552958` WP2.2 docs).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2

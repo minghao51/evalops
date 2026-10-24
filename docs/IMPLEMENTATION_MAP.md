@@ -207,15 +207,31 @@ Repo: https://github.com/minghao51/evalops (public). CI: GitHub Actions matrix 3
 | 0.4 | done | `evalops.contract.formats`, v0 read-compat, semantic fingerprints, exit 7; reviewed |
 | 0.5 | done | `src/evalops/envelope.py`, arg/YAML error envelopes, fd-level stdout capture, 17 goldens, exit matrix 0–7; reviewed |
 | 0.6 | done | `docs/STATE.md`, `CHANGELOG.md`, first CI run |
+| 1.1 redaction | done | `73c5dc7` — 3 outbound boundaries, strict write-path refusal, `redact --check` |
+| 1.3 statistics | done | `eb30dd0` — sample stdev, Wilson/bootstrap, exact pass^k, row_key, pinned baseline, drift, attribution |
+| 1.2 ledger integrity | done | `2a3ac40` — `ledger migrate\|verify`, atomic budget reservation, UTC month, N+1 |
+| 1.4 test debt | done | `1237611` — every exit code 0–7 through real commands; 22 branches mutation-proven |
+| 1.5 trace model v2 | done | `8d0c6d9` — nested `schema_version`, unknown attrs by name, breaker parity |
+| **G1** | **closed** 2026-10-24 | 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
+| 2.1 `evalops pipeline` | done | `135bf0e` + exec-bit `b670d7b` — declarative stage table, `--dry-run`, in-process steps, bash shim |
+| 2.3 presets + capability matrix | done | `684c629` — 7 presets, `evalops init --preset`, generated `docs/CAPABILITIES.md` |
+| 2.2 release re-verification | done | `86f75fa` — fresh guard+gate+baseline re-check before promote, released-group binding (exit 4 on re-release), fork-PR bot branch `evalops/state/pr-<N>`, nightly fails loudly without a baseline |
+| 2.4 CI adapters | **open** | one template → GH/GitLab/Azure/Jenkins, all calling `evalops pipeline`; snapshot test |
+| 2.5 calibration enforcement | **open** | calibration below `judges.min_agreement/min_kappa` fails `pr` |
+| **G2** | **open** | tag `v0.4.0` (D10) after 2.4 + 2.5 |
 
 **G0 closed.** CI run `40047473262` on `main`: py3.10 / 3.11 / 3.12 all green.
+**G1 closed** (2026-10-24, at 283 tests): the full checklist and evidence are in
+[`HANDOFF.md`](../HANDOFF.md) §6; CI `40078618397`.
 
-**Next:** phase 1 — WP1.1 redaction (blocker for real data), WP1.3 statistics (parallel), then
-WP1.2 ledger integrity, WP1.4 test debt, WP1.5 trace model v2.
+**Next:** phase 2 leftovers — WP2.4 (CI adapters: `ci/` holds three hand-written adapters +
+the `pipeline.sh` shim today; **Jenkins is created new**) and WP2.5 (the conditional `calibrate`
+step already exists in the stage table, so this is enforcement semantics + tests, not new
+plumbing). Then the **G2** gate and tag `v0.4.0` (D10). Live status:
+[`docs/STATE.md`](STATE.md) · entry point + coordination rules: [`HANDOFF.md`](../HANDOFF.md) §0/§4.
 
-**Next increment:** phase 1 (WP1.1 redaction, WP1.2 ledger integrity, WP1.3 statistics) — the typed
-config and frozen envelope it depends on are now in place. Start with WP1.1: evalops currently
-persists traces, rows, cassettes and artifacts verbatim, so it must not be used on real data yet.
+**Next increment:** after `HANDOFF.md` §4's coordination fetch check, write the WP2.4 packet from
+the phase-2 row above in `docs/packets/WP2.2.md`'s shape and dispatch it to `evalops-worker`.
 
 ### Phase 0 delivered
 
@@ -249,6 +265,10 @@ syntactic and conservative, and every guard must state — and pin with a test �
 cannot see. Diminishing returns are real: after round 4 the remaining defects were documentation
 accuracy, not behaviour. Future review gates cap doc-only iterations at two rounds and then close
 by orchestrator decision.
+
+Phase-1 and phase-2 review rounds (1–4 rounds per WP; every BLOCK round found something real) are
+logged per WP in [`HANDOFF.md`](../HANDOFF.md) §4's observed-budget table rather than duplicated
+here.
 
 ### Orchestrator closures
 

@@ -11,7 +11,7 @@ adapters) and WP2.5 (calibration enforcement) open. The completed
 
 | | |
 |---|---|
-| Verified base | `86f75fa` (WP2.2) — CI run `40095127593` green on py3.10 / 3.11 / 3.12 |
+| Verified base | `eed5e96` (WP2.2 `86f75fa` + its docs commit) — CI runs `40095127593` / `40095552958` green on py3.10 / 3.11 / 3.12; this handoff refresh sits on top |
 | Tests | 329 offline (`make check`), standalone 329/329, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
 | Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`), **WP2.2 done** (`86f75fa`); **WP2.4 / WP2.5 remain** |
@@ -289,19 +289,32 @@ pin was replaced per the packet's D2. 8 new tests + 1 replaced (321 → 329). Re
 single-document check) and all four mutations on /tmp copies. Residual (non-blocking): the
 `released.app_version` fallback for runs without an `app_version` param is unpinned; `main`/
 `release` with `EVALOPS_PR` set also route to the bot branch (shared path) but only `pr` is
-pinned.
+pinned. Two non-blocking reviewer nits are available as optional cleanups: `_planned_entry`
+sets `entry["reason"]` in two consecutive branches that collapse to one `if step.reason:`, and the
+worker's M1 mutation claim named one red test where two actually went red (stronger, not weaker).
 
-### WP2.4 — CI adapters generated from one template (after 2.2)
+### WP2.4 — CI adapters generated from one template (NEXT)
 
 Write the packet from the map's phase-2 row. All four adapters (GH/GitLab/Azure/Jenkins) render
 from one template and call `evalops pipeline` — no logic in YAML — with a snapshot test. The
-capabilities generator (`make capabilities`) is the code→doc pattern to mirror.
+capabilities generator (`make capabilities`) is the code→doc pattern to mirror. Grounding: `ci/`
+today holds three hand-written adapters (`github-actions.yml`, `gitlab-ci.yml`,
+`azure-pipelines.yml`) plus the `pipeline.sh` shim; **Jenkins does not exist yet** (created new).
+The adapters set `EVALOPS_PR`/`EVALOPS_BRANCH`/`EVIDENCE_GROUP` — WP2.2's bot-branch rule
+(`evalops/state/pr-<EVALOPS_PR>`) is the fork-PR behavior they must surface. Decide (and pin in
+the packet) whether the template is Python-rendered into committed YAML (like
+`make capabilities` → `docs/CAPABILITIES.md`, with a drift test) or a generator script; the map's
+"no logic in YAML" is the invariant either way.
 
-### WP2.5 — calibration enforcement in the pipeline (after 2.2)
+### WP2.5 — calibration enforcement in the pipeline (NEXT)
 
-Write the packet from the map's phase-2 row. Calibration below `judges.min_agreement/min_kappa`
-fails `pr`; the step already exists in the stage table (conditional on the dataset file), so this
-is enforcement semantics + tests, not new plumbing.
+Can run in parallel with WP2.4 only if the other session's tree stays in `ci/**` + a renderer —
+WP2.5 touches `pipeline.py`/tests (disjoint from `ci/**`). Grounding: `_calibrate_step`
+(`pipeline.py`) already runs `calibrate --dataset $CALIB` conditionally on
+`datasets/<CALIB>.jsonl`; enforcement means the **pr** stage fails (and the failure names the
+judge and the measured vs required value) when calibration lands below
+`judges.<name>.min_agreement` / `min_kappa`, per the map row — semantics + tests, not new
+plumbing. Write the packet from the map's phase-2 row.
 
 After 2.4 + 2.5: run the map's G2 checklist and tag **v0.4.0** (D10).
 
