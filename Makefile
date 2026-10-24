@@ -7,7 +7,7 @@ STAGE   ?= dev
 PYTHON  ?= $(shell command -v .venv/bin/python || echo python3)
 
 .PHONY: check test test-unit test-integration test-standalone lint fmt typecheck contract clean \
-        plugins doctor guard sync plan eval gate cost schema capabilities
+        plugins doctor guard sync plan eval gate cost schema capabilities ci-adapters
 
 # ---- dev loop: offline, no docker, no network ---------------------------------
 check: lint typecheck test
@@ -35,6 +35,10 @@ schema:
 # Regenerate the generated capability matrix (drift-tested by tests/unit/test_presets.py).
 capabilities:
 	PYTHONPATH=src $(PYTHON) -c "from evalops.presets import write_capabilities; print(write_capabilities())"
+
+# Regenerate the CI adapters from pipeline.STAGES (drift-tested by tests/unit/test_ci_adapters.py).
+ci-adapters:
+	PYTHONPATH=src $(PYTHON) -c "from evalops.ci_adapters import write_adapters; print(write_adapters())"
 
 # Vendor contract tests need docker-local services; skip cleanly when unavailable.
 contract:

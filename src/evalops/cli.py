@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("plugins", help="show configured plugins per role and all available plugins")
     sub.add_parser("capabilities", help="the preset/plugin capability matrix, generated from code")
+    ci = sub.add_parser("ci-adapters", help="the CI adapters (GitHub, GitLab, Azure, Jenkins) generated from code")
+    ci.add_argument("--write", action="store_true", help="render and (over)write the four adapter files")
+    ci.add_argument(
+        "--dir", default=None, metavar="PATH", help="directory to write them under (default: the repo root)"
+    )
     sub.add_parser("doctor", help="instantiate every configured plugin and check connectivity")
     sub.add_parser("guard", help="static checks: no bypass of versioning, locks present, frozen data intact")
 
@@ -279,9 +284,10 @@ def main(argv=None) -> int:
         env = _early_env(argv, e)
         return _finish(envelope.from_error(_command_from_argv(parser, argv), env, e), JSON_FLAG in argv)
     command = args.cmd
-    if command in ("init", "capabilities"):
-        # `init` writes evalops.yaml (there may be none yet) and `capabilities` is static data, so
-        # both answer before the config loads -- like `--version`, and with the same resolved `env`.
+    if command in ("init", "capabilities", "ci-adapters"):
+        # `init` writes evalops.yaml (there may be none yet) and `capabilities`/`ci-adapters` are
+        # static data generated from code, so all three answer before the config loads -- like
+        # `--version`, and with the same resolved `env`.
         return _finish(_static_envelope(args, argv), args.json)
     try:
         cfg = config_mod.load(args.config)
@@ -393,13 +399,15 @@ def _forward_to_stderr(text: str) -> None:
 
 
 def _static_envelope(args, argv: list[str]) -> dict[str, Any]:
-    """Envelope for the commands that never read ``evalops.yaml`` (``init``, ``capabilities``)."""
-    from . import presets
+    """Envelope for the commands that never read ``evalops.yaml`` (``init``, ``capabilities``, ``ci-adapters``)."""
+    from . import ci_adapters, presets
 
     env = _early_env(argv)
     try:
         if args.cmd == "init":
             data = presets.init(args.preset, directory=args.dir, force=args.force)
+        elif args.cmd == "ci-adapters":
+            data = ci_adapters.command_payload(write=args.write, directory=args.dir)
         else:
             data = presets.capabilities_payload()
     except EvalOpsError as exc:
