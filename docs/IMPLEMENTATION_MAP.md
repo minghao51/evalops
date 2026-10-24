@@ -216,22 +216,22 @@ Repo: https://github.com/minghao51/evalops (public). CI: GitHub Actions matrix 3
 | 2.1 `evalops pipeline` | done | `135bf0e` + exec-bit `b670d7b` — declarative stage table, `--dry-run`, in-process steps, bash shim |
 | 2.3 presets + capability matrix | done | `684c629` — 7 presets, `evalops init --preset`, generated `docs/CAPABILITIES.md` |
 | 2.2 release re-verification | done | `86f75fa` — fresh guard+gate+baseline re-check before promote, released-group binding (exit 4 on re-release), fork-PR bot branch `evalops/state/pr-<N>`, nightly fails loudly without a baseline |
-| 2.4 CI adapters | **open** | one template → GH/GitLab/Azure/Jenkins, all calling `evalops pipeline`; snapshot test |
-| 2.5 calibration enforcement | **open** | calibration below `judges.min_agreement/min_kappa` fails `pr` |
-| **G2** | **open** | tag `v0.4.0` (D10) after 2.4 + 2.5 |
+| 2.4 CI adapters | done | `26d292c` — one template → GH/GitLab/Azure/Jenkins (Jenkins new), drift + no-logic tests, shim untouched |
+| 2.5 calibration enforcement | done | `4e00b29` — real `pr`/`main` stop at a below-threshold `calibrate`; failing judge/metric/limit/measured named in the stage error |
+| **G2** | **open — the only remaining phase-2 item** | tag `v0.4.0` (D10) |
 
 **G0 closed.** CI run `40047473262` on `main`: py3.10 / 3.11 / 3.12 all green.
 **G1 closed** (2026-10-24, at 283 tests): the full checklist and evidence are in
 [`HANDOFF.md`](../HANDOFF.md) §6; CI `40078618397`.
 
-**Next:** phase 2 leftovers — WP2.4 (CI adapters: `ci/` holds three hand-written adapters +
-the `pipeline.sh` shim today; **Jenkins is created new**) and WP2.5 (the conditional `calibrate`
-step already exists in the stage table, so this is enforcement semantics + tests, not new
-plumbing). Then the **G2** gate and tag `v0.4.0` (D10). Live status:
+**Next:** the **G2** gate — no work package left in phase 2. Run the checklist (pipeline parity;
+7 presets with a zero-drift capability matrix; calibration enforced; `make check`, standalone
+runner, `make contract` skip, `make schema` / `make ci-adapters` zero drift; CI matrix green),
+record the evidence, then tag **v0.4.0** (D10). Live status:
 [`docs/STATE.md`](STATE.md) · entry point + coordination rules: [`HANDOFF.md`](../HANDOFF.md) §0/§4.
 
-**Next increment:** after `HANDOFF.md` §4's coordination fetch check, write the WP2.4 packet from
-the phase-2 row above in `docs/packets/WP2.2.md`'s shape and dispatch it to `evalops-worker`.
+**Next increment:** none — the next artifact is the G2 checklist evidence and the `v0.4.0` tag.
+Phase 3b (judges, native-first) starts from WP3b.1 `JudgeSpec` (pin required, unpinned = exit 2).
 
 ### Phase 0 delivered
 

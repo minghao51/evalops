@@ -7,6 +7,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP2.5 calibration enforcement in the pipeline (2026-10-24):** a judge calibration below
+  `judges.<name>.min_agreement` / `min_kappa` fails `evalops pipeline pr` (and `main`) at the
+  `calibrate` step with exit 1 — no plan/eval/gate, no eval run row, nothing promoted — and the
+  stage error now says *why*: it lists every failing check (judge, metric, required limit, measured
+  value) mined from the nested `calibrate` payload, discriminated by `data.judges` so gate failure
+  messages stay byte-identical. A missing calibration dataset remains a skip (pinned as a
+  decision), a passing calibration proceeds unchanged, and four mutations (step removed, calibrate
+  forced green, clause removed, discriminator removed) each turn the named test red. 353 → 359
+  tests; review: 1 round PASS, 0 defects.
 - **WP2.4 CI adapters generated from one template (2026-10-24):** GitHub Actions, GitLab CI,
   Azure Pipelines and Jenkins now render from one template in core
   (`src/evalops/ci_adapters.py`, a per-stage binding table over `pipeline.STAGES`) instead of

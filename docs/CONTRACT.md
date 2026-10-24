@@ -518,8 +518,10 @@ rule is binding on new code but only enforced where a test exists.
   is exit 2. *(target: WP3b.5)*
 - Judge changes ship separately from app changes, bump `judge_prompt_version`, and must pass
   `evalops calibrate` against human labels before gating. Calibration below
-  `judges.<name>.min_agreement` / `min_kappa` blocks the gate. *(calibration command exists; as a
-  gate input: target WP3b.5)*
+  `judges.<name>.min_agreement` / `min_kappa` **fails the `pipeline pr` / `pipeline main` stage**
+  (the `calibrate` step exits 1 and the stage error names the judge, metric, required limit and
+  measured value — WP2.5); consuming calibration as an input of the `gate` command itself is
+  **WP3b.5**.
 - Server-side judge settings (Langfuse project defaults, pydantic-evals defaults) are re-checked in
   the nightly job; drift fails nightly. A wrapper records the **resolved** model per verdict (R3).
   *(target: WP3b.5)*
