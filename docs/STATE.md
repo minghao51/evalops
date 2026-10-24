@@ -4,14 +4,14 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 1 nearly done — WP1.1 (redaction), WP1.3 (statistics) and WP1.2 (ledger integrity) done;
-  next WP1.4 test debt, then WP1.5 trace model v2.
-- **Tests:** 193 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
-  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40058469207`, WP1.3).
+- **Phase:** 1 nearly done — WP1.1 (redaction), WP1.3 (statistics), WP1.2 (ledger integrity) and
+  WP1.4 (test debt) done; next WP1.5 trace model v2, then the G1 checklist.
+- **Tests:** 246 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
+  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40068844584`, WP1.4).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** WP1.4 test debt (gate/cassette/calibrate/traces/promote/rollback/plan exit paths;
-  packet ready at [`packets/WP1.4.md`](packets/WP1.4.md)), then
-  WP1.5 trace model v2. Postgres contract suite: `make contract` with `evalops[sql]` installed.
+- **Next:** write the WP1.5 packet from HANDOFF §6 (trace model v2 + capture hardening) and dispatch
+  it; then run the map's G1 checklist. Postgres contract suite: `make contract` with `evalops[sql]
+  installed.
 
 ## Work packages
 
@@ -27,6 +27,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 1.1 redaction (3 boundaries, strict, `redact --check`, src formatting) | done | `73c5dc7` (4 review rounds: 6 defects) |
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` (1 review round: PASS, 1 cleanup) |
 | 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` (2 review rounds: PG race, dialect dispatch) |
+| 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` (1 review round: PASS, 0 defects; 1 bug fix: `traces` usage exit) |
 
 ## Known compromises (tracked, not forgotten)
 
@@ -58,8 +59,9 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 9. **Row identity falls back to `row_id`** when any stored row lacks `row_key` (native/vendor
    evaluators that build `RowResult` themselves). Reported as `aligned_by: "row_id"`.
 10. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
-   product (Deixic, Inc.). Import name stays `evalops`; distribution name is decided in WP6.1
-   (`evalplane` and `agentgates` are free). See ADR 0001.
+   product (Deixic, Inc.). Import name stays `evalops`; distribution name **decided 2026-10-24:
+   `evalplane`** (ADR 0001's first preference); publication and the pre-publish availability
+   re-check remain in WP6.1. See ADR 0001.
 
 ## How to work in this repo
 

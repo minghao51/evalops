@@ -43,7 +43,7 @@ Numbered; ADRs mirror them in `docs/adr/`. Changing one needs an orchestrator en
 
 | ID | Decision | Resolution | ADR |
 |---|---|---|---|
-| D1 | Package name | Keep import package `evalops` for now. **Do not publish as `evalops`**: PyPI `evalops` is squatted by an unrelated project, and the GitHub org `evalops` + PyPI `evalops-sdk` belong to "Deixic, Inc." (a live EvalOps product). Publish under a free name — `evalplane`, `evalops-core`, or `agentgates` are all free on PyPI; `evalplane`/`agentgates` also free as GitHub org. Final choice before the first release (WP6.1). Distribution name is decoupled from import name. | 0001 |
+| D1 | Package name | Keep import package `evalops` for now. **Do not publish as `evalops`**: PyPI `evalops` is squatted by an unrelated project, and the GitHub org `evalops` + PyPI `evalops-sdk` belong to "Deixic, Inc." (a live EvalOps product). **Distribution name decided 2026-10-24: `evalplane`** (ADR 0001's first preference; free on PyPI + GitHub org at the 2026-10-23 check). Publication stays in WP6.1, which re-verifies availability before publishing and falls back to `agentgates`, then `evalops-core`, only if taken meanwhile. Distribution name is decoupled from import name. | 0001 |
 | D2 | License | Apache-2.0 (patent grant; matches the CI/plugin ecosystem) | 0002 |
 | D3 | Repo | `github.com/minghao51/<repo>`, private until G4, then public. No pushes without explicit instruction. | — |
 | D4 | Pydantic in core | Yes: pydantic v2 for config + generated JSON Schema. Core stays **vendor-free**, not dependency-free. The `ports` layer stays dataclass-based (no pydantic in plugins/scorers). | 0003 |

@@ -1,7 +1,7 @@
 # ADR 0001: Package and distribution naming
 
-- Status: Accepted (final distribution name deferred to WP6.1)
-- Date: 2026-10-23
+- Status: Accepted (distribution name decided 2026-10-24: **`evalplane`**; publication remains WP6.1)
+- Date: 2026-10-23 (amended 2026-10-24)
 - Decision: D1
 
 ## Context
@@ -32,9 +32,13 @@ functional gain: Python import names and distribution names are independent.
 1. Keep the import package `evalops` for the v1 series.
 2. Decouple the **distribution** name from the import name. Do not publish under `evalops` or
    `evalops-sdk`.
-3. Pick the final distribution name in WP6.1, before the first public release. Candidates, in
-   preference order: `evalplane`, `agentgates`, `evalops-core`. Re-verify availability immediately
-   before publishing; this ADR is amended with the final choice.
+3. **Decided (2026-10-24, orchestrator): the distribution name is `evalplane`** — the first
+   preference of this ADR's original candidate order, free on PyPI and as a GitHub org at the
+   2026-10-23 check, short, and it does not overclaim agent-only scope the way `agentgates` would.
+   Publication itself stays in WP6.1, which must still re-verify availability of `evalplane` on
+   PyPI and as a GitHub org immediately before publishing (namespaces change without notice) and
+   fall back to the next candidate (`agentgates`, then `evalops-core`) only if it was taken in the
+   meantime.
 4. The repository stays private until gate G4 and is published only on explicit instruction.
 
 ## Consequences

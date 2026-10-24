@@ -7,6 +7,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP1.4 test debt (2026-10-24):** 53 tests (193 → 246) covering every `gate.check` rule branch
+  (incl. the vacuous-gate and zero-baseline guards), `gate.reliability`/`ci_lower`/`check_rows`,
+  cassette record/replay/miss/save/corruption/key-stability, `calibrate._stats` (perfect/chance/
+  degenerate/threshold paths), `evalops traces` (default group, row filter, redaction), `promote`
+  (all three aliases, baseline pinning, the three guard refusals) and `rollback`, `plan` budget
+  reporting, and **every exit code 0–7 through a real subprocess command path** (process code and
+  `envelope.code` both asserted; exit 4 was previously unasserted anywhere). 22 covered branches are
+  mutation-proven: each mutation turned its named test red and the tree was restored hash-verified.
 - `evalops.contract.formats` (`FORMAT_VERSION = 1`): versioned locks, cassettes, `rows.jsonl`,
   `last_eval.json`, `cost_estimate.json`, and an `evalops/manifest.json` artifact with per-artifact
   hashes. v0 artifacts still read; an unknown future version exits 7 naming the file.
@@ -106,6 +114,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 - `cost.utc_month` / `cost._now_ms` make the month boundary explicit; `check_budget` projects spent
   + outstanding reservations + estimate.
 - `find_runs` fetches kv rows in chunks instead of one query per run (2 statements for 20 runs).
+
+### Fixed (WP1.4)
+
+- `evalops traces` with no `--group` and no `.evalops/out/last_eval.json` exited 5 (runtime) for a
+  missing required argument; it is now exit 2 (usage), matching CONTRACT §1 and the identical
+  condition in `gate.run_gate`. Found by the new test-debt coverage, fixed minimally (+3/−1).
 
 ### Fixed (WP1.2)
 

@@ -1,10 +1,10 @@
-# HANDOFF: evalops — phase 1 nearly done (WP1.4 next)
+# HANDOFF: evalops — phase 1 nearly done (WP1.5 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **193 offline + 1 Postgres contract test, deselected**).
+(tests: **246 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; the dispatch-ready packet for the next WP is
-`docs/packets/WP1.4.md`.
+`docs/STATE.md` is the short status board; `docs/packets/WP1.4.md` is the completed WP1.4 dispatch
+(kept as the packet template — copy its shape for WP1.5).
 
 ---
 
@@ -47,7 +47,7 @@ There is **no system pip** on this machine (Ubuntu, externally managed). Use the
 
 ```bash
 cd evalops
-.venv/bin/python -m pytest -q                    # 193 tests (+1 contract deselected)
+.venv/bin/python -m pytest -q                    # 246 tests (+1 contract deselected)
 .venv/bin/python tests/run_without_pytest.py     # dependency-free runner
 make check                                       # ruff + format + mypy + pytest (what CI runs)
 make schema                                      # regenerate docs/evalops.schema.json
@@ -88,6 +88,7 @@ Observed review budget:
 | WP1.1 redaction | 4 (2 BLOCK + 1 orchestrator-found leak) | 6 |
 | WP1.2 ledger | 2 (BLOCK on a live Postgres race) + 1 narrow dialect round | 3 |
 | WP1.3 statistics | 1 (PASS, one cleanup) | 1 |
+| WP1.4 test debt | 1 (PASS, 0 defects; 3 reviewer-invented mutations also red) | 0 (+1 bug found by tests, fixed) |
 
 Budget 1–3 rounds. Do not skip review to save time — every round found something real. If you find a
 leak after a PASS (as happened in WP1.1 with replay-miss tool args), dispatch a narrow fix round and
@@ -109,10 +110,11 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | 0.6 state/changelog/first CI run | done | `022be67` + run `40047473262` |
 | 1.1 redaction (3 boundaries, strict, `redact --check`, `src/` formatting) | done | `73c5dc7` |
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` |
-| 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
+| WP1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
+| 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` |
 
 CI green on `main` after each docs commit: `40054567708` (WP1.1), `40058469207` (WP1.3),
-`40065497434` (WP1.2).
+`40065497434` (WP1.2), `40068844584` (WP1.4).
 
 **Carried compromises** — 10 items, tracked in [`docs/STATE.md`](docs/STATE.md) §Known compromises.
 Read them before promising anything. The ones that bite:
@@ -128,15 +130,16 @@ Read them before promising anything. The ones that bite:
 
 ## 6. Phase 1 — what is left
 
-### WP1.4 — test debt (NEXT; packet ready)
+### WP1.4 — test debt (DONE, `1237611`)
 
-Dispatch `docs/packets/WP1.4.md` as-is. It requires tests for `gate.check`/`reliability`/`ci_lower`/
-`check_rows`, cassettes (record/replay/miss/fingerprint/corrupt), `calibrate._stats`, `evalops
-traces`, `promote` (all three aliases + the three guard refusals), `rollback`, `plan` budget failure,
-and **every exit code 0–7 reachable through a real command path** (exit 4 is currently unasserted).
-It also demands mutation evidence: break each covered branch and show a named test goes red.
+53 tests (193 → 246): every `gate.check` rule branch, `gate.reliability`/`ci_lower`/`check_rows`,
+cassettes (record/replay/miss/save/corrupt/key stability), `calibrate._stats`, `evalops traces`,
+`promote` (aliases + all three guard refusals), `rollback`, `plan` budget reporting, and every exit
+code 0–7 through a real subprocess command path. 22 branches are mutation-proven (each mutation
+turned its named test red, tree restored hash-verified). One bug found and fixed minimally: `traces`
+without `--group`/`last_eval.json` now exits 2 (usage), not 5. Review round 1: PASS, 0 defects.
 
-### WP1.5 — trace model v2 + capture hardening (after 1.4)
+### WP1.5 — trace model v2 + capture hardening (NEXT)
 
 Expected done-when (write the full packet from the map's row then):
 - `AgentTrace` gains `schema_version` (v1 reads, v2 writes; round-trip both) and a documented
@@ -170,7 +173,7 @@ live services and credentials.
 
 | Item | State | Needs |
 |---|---|---|
-| **Distribution name** | import stays `evalops`; PyPI `evalops`/`evalops-sdk` and GitHub org `evalops` belong to Deixic, Inc. `evalplane`, `agentgates`, `evalops-core` are free. | user decides at WP6.1 (ADR 0001) |
+| **Distribution name** | **Decided 2026-10-24: `evalplane`** (ADR 0001's first preference; import stays `evalops`). Publication + pre-publish availability re-check remain in WP6.1; fallbacks `agentgates`, `evalops-core`. | execute at WP6.1 |
 | **LICENSE file** | ADR 0002 chose Apache-2.0; no file/metadata yet (deferred to WP6.1) | add at WP6.1 |
 | **Phase 3 credentials** | docker is available; LangSmith/Logfire/Databricks need keys | **ask the user before phase 3** |
 | **MySQL contract service** | budget upsert is dialect-correct but text-verified only | optional: add a mysql service to `tests/contract/` |
@@ -204,8 +207,9 @@ src/evalops/
   scorers/               trajectory scorers + judge adapters
   plugins/               git, sql (schema v1 + budget), core, mlflow, langfuse, langsmith, logfire
 tests/
-  unit/                  contract/formats, config, envelope, guard, redact, gate_stats, ledger_sql,
-                         cost_budget, traces, scorers, no-vendor-imports, core
+  unit/                  contract/formats, config, envelope, guard, redact, gate_stats, gate_rules,
+                         ledger_sql, cost_budget, cassettes, calibrate, cli_commands, exit_codes,
+                         traces, scorers, no-vendor-imports, core, _projects helper
   integration/           full lifecycle on zero-dep plugins (local + agent)
   contract/              Postgres ledger (docker compose; skipped offline)
   fixtures/              fake apps, v0 format fixtures, envelope goldens
@@ -224,16 +228,17 @@ sed -n '/### Phase 1/,/### Phase 2/p' docs/IMPLEMENTATION_MAP.md
 
 Then:
 
-1. Read `docs/packets/WP1.4.md` and dispatch it to `evalops-worker`
-   (`deepseek/deepseek-flash`) with `cwd` = the repo.
+1. Write the WP1.5 packet from §6 (copy `docs/packets/WP1.4.md`'s shape) and dispatch it to
+   `evalops-worker` (`deepseek/deepseek-flash`) with `cwd` = the repo.
 2. Send the working tree (untracked test files included) to `evalops-reviewer`
-   (`zai/glm-5.3-flash`, thinking `high`) using the review prompt at the end of the packet.
+   (`zai/glm-5.3-flash`, thinking `high`) with the packet's done-when.
 3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), push, and
    confirm CI with `gh run list`.
-4. Then write the WP1.5 packet from §6 and repeat.
+4. Then run the map's G1 checklist, update `docs/STATE.md`, and start phase 2 (WP2.1).
 
 Suggested opening message for the new thread:
 
-> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. We are at phase 1, WP1.4 next.
-> Dispatch `docs/packets/WP1.4.md` to `evalops-worker` (deepseek/deepseek-flash), review with
-> `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI.
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. We are at phase 1, WP1.5 next (then the
+> G1 gate). Write the WP1.5 packet from HANDOFF §6 in the shape of `docs/packets/WP1.4.md`, dispatch
+> it to `evalops-worker` (deepseek/deepseek-flash), review with `evalops-reviewer`
+> (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI.
