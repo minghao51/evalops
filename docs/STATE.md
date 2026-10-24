@@ -8,14 +8,14 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   capability matrix) done; remaining: WP2.2 (release re-verification, fork-PR locks, nightly
   baseline), WP2.4 (CI adapters), WP2.5 (calibration enforcement), then G2 (tag v0.4.0).
   Phase 1 is closed (G1).
-- **Tests:** 321 green (`make check`), 17 at baseline. **Postgres contract:** 1 passed with
-  `.[sql]` + docker. **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40089721659`,
-  WP2.3).
+- **Verified base:** `4f8da78` (this docs commit sits on top); **tests:** 321 green (`make check`),
+  17 at baseline. **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:**
+  py3.10/3.11/3.12 green on `main` (last completed run: `40091261008`, WP2.3 handoff).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
   compatibility; `make check` 283, standalone 283/283, `make schema` zero drift, goldens untouched;
-  Postgres contract 1 passed (`.[sql]`, docker). CI run `40078618397`.
+  Postgres contract 1 passed (`.[sql,dev]`, docker). CI run `40078618397`.
 - **Next:** WP2.2 (release re-verification) and WP2.5 (calibration enforcement) are the open
   phase-2 WPs that touch the pipeline; WP2.4 (CI adapters) builds on `evalops pipeline`. Packet
   shape: `docs/packets/WP2.1.md` / `WP2.3.md`. Contract suite: `make contract` with `evalops[sql]`
@@ -40,7 +40,6 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 2.1 `evalops pipeline <stage>` (stage table, dry-run, idempotence, bash shim) | done | `135bf0e` + exec-bit fix `b670d7b` (narrow re-review PASS) |
 | 2.3 presets (`init --preset` ×7) + `evalops capabilities` + generated `docs/CAPABILITIES.md` | done | `684c629` (1 review round: PASS, 0 defects) |
 | **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
-| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds; 19 → 22 pipeline tests) |
 
 ## Known compromises (tracked, not forgotten)
 
@@ -75,6 +74,15 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    product (Deixic, Inc.). Import name stays `evalops`; distribution name **decided 2026-10-24:
    `evalplane`** (ADR 0001's first preference); publication and the pre-publish availability
    re-check remain in WP6.1. See ADR 0001.
+11. **The pipeline runs nested commands in-process.** `EVALOPS_ACTOR` defaults to `ci` by mutating
+   the process environment; a git failure is exit 5 (bash would surface git's own code). Nightly
+   `--dry-run` lists checkout/eval/gate/restore even when a missing baseline would skip, and
+   dynamic values are placeholders (`<EVIDENCE_GROUP>`, `<baseline git_sha>`, …).
+12. **A *drained* nightly restore that itself fails records exit 5 in `data.steps`, but that branch
+   is untested** (it needs mocking `_git`). The in-plan failure path is tested, and
+   `_error_envelope`'s code normalization has a unit pin.
+13. **`ci_log.jsonl` is now one JSON envelope per line.** The bash pipeline teed multi-line rendered
+   envelopes; line-oriented consumers still work, but the byte shape differs.
 
 ## How to work in this repo
 
@@ -83,6 +91,9 @@ make check            # lint + typecheck + unit/integration tests (offline)
 make test             # pytest only
 make test-standalone  # dependency-free runner (no pytest)
 make schema           # regenerate docs/evalops.schema.json
+make capabilities     # regenerate docs/CAPABILITIES.md
+.venv/bin/evalops pipeline pr --dry-run   # list the CI stage steps; writes nothing
+.venv/bin/evalops init --preset local --dir /tmp/new-project   # render a starter evalops.yaml
 ```
 
 Rules that matter: persisted formats are additive and versioned; a green suite is not evidence of a

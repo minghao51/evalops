@@ -7,6 +7,21 @@ Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATIO
 re-verification), WP2.4 (CI adapters) and WP2.5 (calibration enforcement) open. The completed
 `docs/packets/WP2.1.md` / `WP2.3.md` are the packet templates.
 
+## 0. Current snapshot (start here)
+
+| | |
+|---|---|
+| Verified base | `4f8da78` (this docs commit sits on top) — CI run `40091261008` green on py3.10 / 3.11 / 3.12 |
+| Tests | 321 offline (`make check`), standalone 321/321, 1 Postgres contract test (excluded) |
+| Phase 1 | **closed at G1** (WP1.1–1.5) |
+| Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`); **WP2.2 / WP2.4 / WP2.5 remain** |
+| Tree | clean; no uncommitted work |
+| Next artifact | `docs/packets/WP2.2.md` (copy `docs/packets/WP2.3.md`, the newest template) |
+| Gate ahead | **G2**: pipeline parity, 7 presets, calibration enforced; tag **v0.4.0** |
+
+A second session may be working this repo: read §4's coordination rules first and fetch/rebase
+before every commit. The exact opening message is at the end of §10.
+
 ---
 
 ## 1. What this is
@@ -69,11 +84,14 @@ Postgres contract work (WP1.2 established this pattern):
 
 ```bash
 uv venv /tmp/pgvenv --python .venv/bin/python
-uv pip install --python /tmp/pgvenv/bin/python -e ".[sql]"
-docker compose -f tests/contract/docker-compose.yml up -d
+uv pip install --python /tmp/pgvenv/bin/python -e ".[sql,dev]"   # pytest is in the dev extra
+docker compose -f tests/contract/docker-compose.yml up -d        # idempotent if already running
 /tmp/pgvenv/bin/python -m pytest -q -m contract tests/contract -v
-docker compose -f tests/contract/docker-compose.yml down -v
+docker compose -f tests/contract/docker-compose.yml down -v      # optional; leave it to reuse
 ```
+
+`make contract` in the default `.venv` skips (no psycopg); the pgvenv run above is the real check.
+The container may already be running from an earlier session; `docker compose ps` first.
 
 Fresh clone: `uv venv .venv && uv pip install --python .venv/bin/python -e ".[dev]"`.
 
@@ -140,7 +158,7 @@ a narrow re-review; do not commit an unreviewed change.
 Commit style: one logical change per commit, imperative subject, body explains the *why*, the WP id,
 and the review rounds. Never commit with a red suite. Docs commits are separate (`docs: WP1.x state…`).
 
-## 5. Where phase 0 + 1 stand
+## 5. Where phases 0–2 stand
 
 | WP | State | Commit |
 |---|---|---|
@@ -159,14 +177,14 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds) + exec-bit fix `b670d7b` |
 | 2.3 presets (`init --preset` ×7, capability matrix from code, generated `docs/CAPABILITIES.md`) | done | `684c629` (1 review round: PASS, 0 defects) |
 
-**G1 closed** (2026-10-24): 283 tests, standalone 283/283, Postgres contract 1 passed, `make schema`
+**G1 closed** (2026-10-24, at 283 tests): standalone 283/283, Postgres contract 1 passed, `make schema`
 zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
 
-CI green on `main` after each docs commit: `40054567708` (WP1.1), `40058469207` (WP1.3),
-`40065497434` (WP1.2), `40068844584` (WP1.4), `40069033269` (WP1.4 docs), `40078618397` (WP1.5),
-`40089721659` (WP2.3), `40090077171` (WP2.3 docs).
+CI green on `main` (py3.10/3.11/3.12) at the milestones: `40054567708` (WP1.1),
+`40058469207` (WP1.3), `40065497434` (WP1.2), `40068844584` (WP1.4), `40078618397` (WP1.5),
+`40079041204` (G1), `40085640784` (WP2.1), `40089721659` (WP2.3), `40091261008` (WP2.3 handoff).
 
-**Carried compromises** — 10 items, tracked in [`docs/STATE.md`](docs/STATE.md) §Known compromises.
+**Carried compromises** — 13 items, tracked in [`docs/STATE.md`](docs/STATE.md) §Known compromises.
 Read them before promising anything. The ones that bite:
 - vendor plugins remain unverified (`VERIFY` markers; logfire reads a private SQL table) — phase 3;
 - a redacted cassette is lossy on reload; record/replay identity needs `mode: off` or hash-only rules;
@@ -176,7 +194,13 @@ Read them before promising anything. The ones that bite:
 - MySQL budget reservation is text-verified only; a fresh/legacy SQL ledger reports `schema_version: 0`
   until `evalops ledger migrate`;
 - pass^k is the plug-in estimator; row alignment falls back to `row_id` without `row_key`;
-- a mid-artifact-loop backend write failure can leave a prefix (no manifest yet to flag it).
+- a mid-artifact-loop backend write failure can leave a prefix (no manifest yet to flag it);
+- the pipeline runs nested commands **in-process**: `EVALOPS_ACTOR` defaults to `ci` by mutating the
+  process env, and a git failure is exit 5 (bash would surface git's own code);
+- nightly `--dry-run` lists checkout/eval/gate/restore even when a missing baseline would skip, and
+  dynamic values are placeholders; a *drained* restore that itself fails records exit 5 in
+  `data.steps` but that branch is untested (needs mocking `_git`);
+- `ci_log.jsonl` is now one JSON envelope per line (bash teed multi-line rendered envelopes).
 
 ## 6. Phase status — phase 1 closed (G1); phase 2 at WP2.2/2.4/2.5
 
@@ -273,7 +297,7 @@ After 2.2 + 2.4 + 2.5: run the map's G2 checklist and tag **v0.4.0** (D10).
 
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
-| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim); 2.2 release re-verification + fork-PR locks + nightly fails without baseline; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins); 2.5 calibration enforced in the pipeline | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
+| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **next**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins); 2.5 calibration enforced in the pipeline | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
 | **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned = exit 2); 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement, resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
