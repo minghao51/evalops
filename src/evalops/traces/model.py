@@ -8,12 +8,21 @@ same trajectory scorer works for every framework, offline in CI and online on pr
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from ..contract import redact
+from ..util import FormatError
 
 KINDS = ("agent", "llm", "tool", "retrieval", "embedding", "chain", "guardrail", "handoff", "other")
+
+#: The nested trace document's own version (CONTRACT §5.6), independent of `FORMAT_VERSION`.
+#: Writers always emit this value; readers accept an absent version as v1 and an explicit 1 or 2.
+TRACE_SCHEMA_VERSION = 2
+_READABLE_TRACE_VERSIONS = (1, TRACE_SCHEMA_VERSION)
+
+#: The closed set of capture-path labels `AgentTrace.source` may carry.
+SOURCE = ("otel", "langchain", "openai_agents", "mixed", "stored", "unknown")
 
 
 @dataclass
@@ -34,6 +43,8 @@ class Span:
     error: str | None = None
     attributes: dict = field(default_factory=dict)  # small, filtered raw attributes (e.g. operation)
     seq: int = 0  # capture order, tie-breaker for equal timestamps
+    # Names (never values: a value may be a secret) of raw attributes `normalize()` did not model.
+    unknown_attributes: list[str] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -44,7 +55,8 @@ class Span:
 class AgentTrace:
     spans: list[Span]
     trace_id: str | None = None
-    source: str = "unknown"  # otel | langchain | openai_agents | mixed | stored
+    source: str = "unknown"  # one of SOURCE
+    schema_version: int = TRACE_SCHEMA_VERSION  # the version this document was *read* with
 
     # ---------- structure ----------
     def ordered(self) -> list[Span]:
@@ -108,6 +120,14 @@ class AgentTrace:
             return 0.0
         return max(0, max(s.end_ns for s in self.spans) - min(s.start_ns for s in self.spans)) / 1e9
 
+    def unknown_attributes(self) -> dict[str, int]:
+        """`{attribute name: number of spans carrying it}` over the whole trace (sorted, names only)."""
+        counts: dict[str, int] = {}
+        for span in self.spans:
+            for name in span.unknown_attributes:
+                counts[name] = counts.get(name, 0) + 1
+        return dict(sorted(counts.items()))
+
     def metrics(self) -> dict[str, float]:
         tools = self.tool_calls()
         tin, tout = self.tokens()
@@ -137,17 +157,38 @@ class AgentTrace:
             d = asdict(s)
             d["inputs"], d["outputs"] = clip(s.inputs), clip(s.outputs)
             spans.append(d)
-        document = {"trace_id": self.trace_id, "source": self.source, "spans": spans}
+        # Writers always emit the current version: a trace read as v1 (or unversioned) is upgraded
+        # on write. Unknown top-level/span keys were already dropped by `from_dict`.
+        document = {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "trace_id": self.trace_id,
+            "source": self.source,
+            "spans": spans,
+        }
         # Outbound boundary (CONTRACT §5.1): the persisted/emitted trace is a redacted *deep copy*.
         # The in-memory trace -- what scorers, `render` and replay see -- is never modified.
         return redact.redact_document(document)
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> AgentTrace | None:
+    def from_dict(cls, d: dict | None, source: str | None = None) -> AgentTrace | None:
+        """Read a trace document; `source` names the *artifact* in a format error (exit 7).
+
+        An absent `schema_version` is v1 (the legacy shape); explicit 1 and 2 are accepted and the
+        returned object records the version it read. Anything else is a contract mismatch. Unknown
+        top-level and unknown span keys are ignored, never a `TypeError`.
+        """
         if not d:
             return None
+        found = d.get("schema_version", 1)
+        if isinstance(found, bool) or not isinstance(found, int) or found not in _READABLE_TRACE_VERSIONS:
+            raise FormatError(source or "trace", found, TRACE_SCHEMA_VERSION)
+        known = {f.name for f in fields(Span)}
+        spans = [Span(**{k: v for k, v in s.items() if k in known}) for s in (d.get("spans") or [])]
         return cls(
-            spans=[Span(**s) for s in d.get("spans", [])], trace_id=d.get("trace_id"), source=d.get("source", "stored")
+            spans=spans,
+            trace_id=d.get("trace_id"),
+            source=d.get("source") or "stored",
+            schema_version=found,
         )
 
     def render(self, max_chars: int = 200) -> str:

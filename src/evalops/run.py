@@ -7,7 +7,7 @@ import inspect
 import json
 import os
 import uuid
-from typing import cast
+from typing import Any, cast
 
 from . import cost, locks
 from . import datasets as ds_mod
@@ -117,7 +117,7 @@ def rows_from_artifact(text, source: str = "evalops/rows.jsonl") -> list[RowResu
                 trace_id=d.get("trace_id"),
                 scores=d.get("scores") or {},
                 error=d.get("error"),
-                trace=AgentTrace.from_dict(d.get("trace")),
+                trace=AgentTrace.from_dict(d.get("trace"), source=source),
                 trace_metrics=d.get("trace_metrics") or {},
                 row_key=d.get("row_key"),  # additive: v0 rows have no stable key
             )
@@ -276,7 +276,7 @@ def _evaluate(
                 r["inputs"],
                 r.get("outputs"),
                 r.get("expectations"),
-                trace=AgentTrace.from_dict(r.get("trace")),
+                trace=AgentTrace.from_dict(r.get("trace"), source=f"dataset:{dataset}"),
                 row_key=keys[i],
             )
             for i, r in enumerate(records)
@@ -490,23 +490,32 @@ def baseline(cfg) -> dict:
     }
 
 
-def show_traces(cfg, group, row=None, as_tree=True) -> dict:
+def show_traces(cfg, group, row=None, as_tree=True, unknown_attrs=False) -> dict:
     ledger = cast(Ledger, Registry(cfg).get("ledger"))
     runs = ledger.find_runs(tags={"evalops.group": group}, limit=1)
     if not runs:
         raise EvalOpsError(f"no runs for group {group}", EXIT_USAGE)
     out = []
+    aggregate: dict[str, int] = {}
     for r in rows_from_artifact(ledger.get_artifact(runs[0].run_id, "evalops/rows.jsonl")):
         if row and r.row_id != row:
             continue
-        out.append(
-            {
-                "row_id": r.row_id,
-                "inputs": r.inputs,
-                "scores": r.scores,
-                "error": r.error,
-                "trace_metrics": r.trace_metrics,
-                "tree": r.trace.render() if r.trace else None,
-            }
-        )
-    return {"summary": f"{len(out)} row(s) from run {runs[0].run_id}", "rows": out}
+        item = {
+            "row_id": r.row_id,
+            "inputs": r.inputs,
+            "scores": r.scores,
+            "error": r.error,
+            "trace_metrics": r.trace_metrics,
+            "tree": r.trace.render() if r.trace else None,
+        }
+        if unknown_attrs:
+            # Additive, opt-in: the default payload stays byte-identical (the envelope golden).
+            per_trace = r.trace.unknown_attributes() if r.trace else {}
+            item["unknown_attributes"] = sorted(per_trace)
+            for name, count in per_trace.items():
+                aggregate[name] = aggregate.get(name, 0) + count
+        out.append(item)
+    data: dict[str, Any] = {"summary": f"{len(out)} row(s) from run {runs[0].run_id}", "rows": out}
+    if unknown_attrs:
+        data["unknown_attributes"] = dict(sorted(aggregate.items()))
+    return data

@@ -64,6 +64,58 @@ KEEP_ATTRS = (
     "langgraph_node",
 )
 
+#: Every raw attribute name this module consumes (all dialect aliases) plus the ones it keeps in
+#: `Span.attributes`. Anything else is reported by *name* in `Span.unknown_attributes`, never by value.
+KNOWN_ATTRS = frozenset(
+    {
+        *KEEP_ATTRS,
+        # classification
+        "llm.request.type",
+        # models
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "llm.model_name",
+        "llm.request.model",
+        # token usage
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.prompt_tokens",
+        "llm.token_count.prompt",
+        "llm.usage.prompt_tokens",
+        "gen_ai.usage.output_tokens",
+        "gen_ai.usage.completion_tokens",
+        "llm.token_count.completion",
+        "llm.usage.completion_tokens",
+        # generic payloads
+        "input.value",
+        "traceloop.entity.input",
+        "output.value",
+        "traceloop.entity.output",
+        # tool name / arguments / result
+        "gen_ai.tool.name",
+        "tool.name",
+        "traceloop.entity.name",
+        "gen_ai.tool.call.arguments",
+        "gcp.vertex.agent.tool_call_args",
+        "tool_arguments",
+        "tool.parameters",
+        "gen_ai.tool.call.result",
+        "gcp.vertex.agent.tool_response",
+        "tool_response",
+        # agent names and LangChain/OpenInference metadata (holds `langgraph_node`)
+        "gen_ai.agent.name",
+        "agent_name",
+        "agent.name",
+        "metadata",
+        # LLM messages
+        "gen_ai.input.messages",
+        "gcp.vertex.agent.llm_request",
+        "gen_ai.output.messages",
+        "gcp.vertex.agent.llm_response",
+        # errors
+        "error.type",
+    }
+)
+
 
 def _first(attrs: dict, *keys, default=None):
     for k in keys:
@@ -202,6 +254,8 @@ def normalize(raw: dict, seq: int = 0) -> Span:
         span.inputs, span.outputs = _maybe_json(generic_in), _maybe_json(generic_out)
     if not span.error and attrs.get("error.type"):
         span.error = str(attrs["error.type"])
+    # Report unmodeled attributes by name only, sorted and deduplicated: a raw value may be a secret.
+    span.unknown_attributes = sorted({str(k) for k in attrs if k not in KNOWN_ATTRS})
     return span
 
 

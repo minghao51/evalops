@@ -363,6 +363,7 @@ Versioned artifacts:
 | `.evalops/locks/<env>/prompts.lock.json`, `datasets.lock.json` | reserved `_meta.schema_version` |
 | `cassettes/<dataset>.jsonl` | first line `{"_meta": {...}}` |
 | `evalops/rows.jsonl` artifact | per line |
+| `evalops/rows.jsonl` `trace` field (nested trace document) | nested `trace.schema_version` (`TRACE_SCHEMA_VERSION = 2`, WP1.5 §5.6) |
 | `evalops/cost_estimate.json` artifact | top level |
 | `.evalops/out/last_eval.json` | top level |
 | `evalops/manifest.json` artifact | top level (`evalops_version` too; it lists the hashed artifacts) |
@@ -469,6 +470,36 @@ Invariants:
    becomes a list, a set/dataclass/custom object becomes `str(value)`. The tree that is scanned is
    therefore bit-for-bit the tree that is serialized, so a secret carried by a non-JSON value is
    redacted (and refused by `strict`) exactly like one in a dict/list.
+
+### 5.6 Nested trace document (`evalops/rows.jsonl` `trace`) — WP1.5, additive
+
+The normalized agent trace is a **second, independently versioned document** nested in every rows
+line (§4 rules apply unchanged; this is an additive §5 row, not an invariant change):
+
+- **Identifier.** `TRACE_SCHEMA_VERSION = 2`, in `src/evalops/traces/model.py` and exported from
+  `evalops.traces`. It is separate from `FORMAT_VERSION`, which still versions the rows line.
+- **Writers emit 2 only.** `AgentTrace.to_dict()` always writes `"schema_version": 2`; a document
+  read as v1 (or unversioned) is therefore upgraded on the next write.
+- **Readers accept the past.** An **absent** `trace.schema_version` is **v1**, the legacy shape
+  written before this row existed (rule 4: a missing version is the legacy format, never guessed as
+  current). An explicit `1` or `2` is accepted and the object records the version it read.
+- **Anything else is exit 7.** `3+`, `0`, a string, `null` and a bool raise `FormatError` naming the
+  artifact and the supported maximum (`evalops/rows.jsonl`, or `dataset:<name>` on the calibration
+  path), exactly as rule 3 requires. Unknown top-level and unknown span keys are ignored, never a
+  `TypeError`.
+- **Metadata only for rows and row identity.** The trace version never enters `app_version` or
+  `row_key`, and the same trace as v1 and as v2 yields identical `trace_metrics` and identical gate
+  checks. A **trace-less** dataset's fingerprint is unchanged. A dataset **source record that
+  embeds a trace document** is fingerprinted verbatim (§4), so upgrading that embedded document
+  changes the dataset fingerprint by design: it is a new dataset snapshot, not a metadata-only
+  change.
+- **Unmodeled attributes are reported by name.** `Span.unknown_attributes` lists the *names* of raw
+  attributes `normalize()` did not consume (sorted, deduplicated — never values, which may be
+  secrets), and `AgentTrace.unknown_attributes()` aggregates them as `{name: span_count}`.
+  `evalops traces --unknown-attrs` is the only surface for them, so the default `traces` payload
+  (and its envelope golden) is unchanged.
+
+---
 
 ## 6. Judge pinning
 

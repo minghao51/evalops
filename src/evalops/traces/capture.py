@@ -28,6 +28,17 @@ class BudgetExceeded(RuntimeError):
     """Raised (where the framework allows) when a row exceeds its step/token/time limits."""
 
 
+#: How far the circuit breaker can go on each capture path (docs/AGENT_TRACES.md mirrors this table).
+#: NEVER claim enforcement where the framework swallows or cannot see the abort: the honest answer
+#: is post-hoc / cooperative, paired with the framework's own hard stop.
+BREAKER_PARITY = {
+    "langchain": "enforced",  # on_llm_start/on_tool_start raise BudgetExceeded before the step
+    "otel": "post-hoc",  # spans are observed; cap.exceeded becomes a row error after predict
+    "openai_agents": "post-hoc",  # the SDK swallows processor exceptions; set max_turns
+    "custom": "cooperative",  # check_budget() raises from inside a custom loop
+}
+
+
 class RowCapture:
     def __init__(self, row_id: str, limits: dict | None = None):
         self.row_id = row_id

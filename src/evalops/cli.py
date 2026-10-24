@@ -89,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     tr = sub.add_parser("traces", help="show normalized agent traces of a run group")
     tr.add_argument("--group", help="default: group from .evalops/out/last_eval.json")
     tr.add_argument("--row", help="row id, e.g. 00003")
+    tr.add_argument(
+        "--unknown-attrs",
+        action="store_true",
+        help="report span attribute names normalize() did not model (names only, never values)",
+    )
 
     g = sub.add_parser("gate", help="compare a run group to the production baseline")
     g.add_argument("--group", help="default: group from .evalops/out/last_eval.json")
@@ -223,7 +228,7 @@ def dispatch(args, cfg) -> dict:
             # No --group and no last_eval.json is a usage error (exit 2), the same verdict
             # `gate.run_gate` gives for the same situation: the caller named no group.
             raise EvalOpsError("no --group and no last_eval.json", EXIT_USAGE)
-        return run.show_traces(cfg, group, args.row)
+        return run.show_traces(cfg, group, args.row, unknown_attrs=args.unknown_attrs)
     if args.cmd == "gate":
         return gate.run_gate(cfg, args.group, args.label)
     if args.cmd == "promote":

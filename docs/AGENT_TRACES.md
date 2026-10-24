@@ -31,9 +31,16 @@ For agents, an eval case is **input → trajectory → output**. evalops capture
 | **DSPy** | OpenInference OTel | `traces.instrument: [dspy]` | module limits |
 | **Custom loop** | Any OTel GenAI spans + `evalops.traces.check_budget()` | Instrument your LLM client (`traces.instrument: [openai]`, `anthropic`, `litellm`, …) | your own `max_steps` |
 
-**How the circuit breaker stops a run:**
-- **LangGraph/LangChain:** the breaker raises `BudgetExceeded` before the next LLM or tool call, which aborts the run.
-- **OTel-only and OpenAI Agents frameworks:** the breaker can't interrupt the run. Instead, the row is marked `budget_exceeded` after the fact, async runs are cut off by `row_limits.max_seconds`, and you should **also** set the framework's own hard stop (right column).
+**How the circuit breaker stops a run** — `evalops.traces.capture.BREAKER_PARITY` is the source of truth, and every row below has a regression test:
+
+| Capture path | `BREAKER_PARITY` | What actually happens |
+|---|---|---|
+| `langchain` | `enforced` | `on_llm_start` / `on_tool_start` raise `BudgetExceeded` before the step, aborting the run. Also keep `recursion_limit`. |
+| `otel` | `post-hoc` | Spans are only observed; `cap.exceeded` becomes the row's `budget_exceeded` error after predict. Keep the framework's own hard stop (right column above). |
+| `openai_agents` | `post-hoc` | The SDK swallows processor exceptions, so the processor only sets `cap.exceeded` -> the same post-hoc row error. Set `max_turns`. |
+| `custom` | `cooperative` | `evalops.traces.check_budget()` raises inside your loop; only a loop that calls it can be stopped. |
+
+`row_limits.max_seconds` cuts off an **async** predict: the core evaluator cancels the coroutine that outlives the limit and the row records `predict: TimeoutError`, which is never relabelled as `budget_exceeded`. A **sync** predict cannot be interrupted (there is no timer watching it); it is only flagged when it records a span or step after the limit has already passed, so pair it with the framework's own hard stop.
 
 **Verification status:**
 - Tested end to end: the LangGraph callback path and every scorer, gate, cassette, and calibration feature.
@@ -54,6 +61,28 @@ Traces are stored with every run (`evalops/rows.jsonl` in the ledger). To inspec
 ```bash
 evalops traces --row 00003        # indented tree: [agent] supervisor > [tool] lookup_order args=… -> …
 ```
+
+## Trace document version
+The normalized trace is stored as a versioned document inside every `evalops/rows.jsonl` line, with its own `TRACE_SCHEMA_VERSION = 2` (`src/evalops/traces/model.py`, CONTRACT §5.6). The rows line keeps `FORMAT_VERSION = 1`; the two versions are independent.
+
+| Nested `trace.schema_version` | Reader |
+|---|---|
+| absent | v1, the legacy shape: read fine |
+| `1` or `2` | accepted; the object records the version it read |
+| `3+`, `0`, a string, `null`, a bool | `FormatError` -> exit 7 naming the artifact (`evalops/rows.jsonl`, or `dataset:<name>` on the calibration path) |
+
+`AgentTrace.to_dict()` always writes `2`, so re-writing a v1 row upgrades it. The version is metadata for rows and row identity: it never enters `app_version` or `row_key`, and v1 and v2 of the same trace produce identical `trace_metrics` and gate checks. A trace-less dataset fingerprint is unchanged; a dataset source record that embeds a trace document is fingerprinted verbatim, so upgrading an embedded trace is a new dataset snapshot by design. `AgentTrace.source` is exactly one of `otel`, `langchain`, `openai_agents`, `mixed`, `stored`, `unknown` (a document that omits it reads as `stored`).
+
+### Unknown span attributes
+`normalize()` knows the attributes it consumes (all GenAI/OpenInference/Traceloop aliases plus the kept ones). Every other raw attribute is recorded by **name only** — never by value, because a value may be a secret — sorted and deduplicated, in `Span.unknown_attributes`; `AgentTrace.unknown_attributes()` returns `{name: span_count}`.
+
+```bash
+evalops traces --row 00003 --unknown-attrs
+# data.rows[i].unknown_attributes          -> ["weird.vendor.attr"]  (sorted names)
+# data.unknown_attributes                  -> {"weird.vendor.attr": 1} (span count)
+```
+
+Without `--unknown-attrs` the payload is byte-identical to before the flag existed (its envelope golden is frozen); `--row` filtering still applies with the flag.
 
 ## Scoring at three levels (cheapest first)
 1. **Outcome.** Any scorer over `outputs`, or `expected_state` for agents that act rather than answer.
