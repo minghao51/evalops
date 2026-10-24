@@ -152,6 +152,23 @@ gates: {metrics: {facts/mean: {min: 0.5}}}
 GATE_FAIL_CONFIG = GATE_PASS_CONFIG.replace("-pass", "-fail").replace("{min: 0.5}", "{min: 0.95}")
 BROKEN_CONFIG = CONFIG + "gates:\n  metrics:\n    facts/mean: {minn: 1}\n"
 
+# WP1.1: `evalops redact --check` gets its own additive golden (a *new* command, so the §2 list of
+# pre-existing goldens is unchanged). The document holds a planted secret, the rules redact it, and
+# the command reports the would-be changes without writing -- a read-only command is deterministic.
+REDACT_CONFIG = (
+    CONFIG
+    + """
+redact:
+  mode: strict
+  fields: ["inputs.password"]
+  patterns:
+    - {name: email, regex: '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}'}
+"""
+)
+SECRETS_JSON = (
+    '{\n  "inputs": {\n    "password": "hunter2-PLANTED",\n    "note": "mail alice@example.com"\n  },\n  "keep": 1\n}\n'
+)
+
 # D3: a predict hook that prints. With --json that text is a diagnostic and must land on stderr.
 NOISY_APP = """
 from fake_app import build_predict_fn as fake_predict
@@ -517,6 +534,7 @@ GOLDEN_NAMES = (
     "gate_pass",
     "gate_failure",
     "sync_check_failure",
+    "redact",
 )
 
 
@@ -533,6 +551,8 @@ def _golden_project() -> pathlib.Path:
             "gate_pass.yaml": GATE_PASS_CONFIG,
             "gate_fail.yaml": GATE_FAIL_CONFIG,
             "broken_config.yaml": BROKEN_CONFIG,
+            "redact_config.yaml": REDACT_CONFIG,
+            "secrets.json": SECRETS_JSON,
         },
     )
 
@@ -569,6 +589,8 @@ def _golden_envelopes(root: pathlib.Path) -> dict[str, tuple[int, dict]]:
     prompt = root / "prompts" / "support_system.txt"
     prompt.write_text(prompt.read_text() + "\nAlways be extra polite.\n")
     run("sync_check_failure", "sync", "prompts", "--check")
+    # WP1.1: read-only, so it cannot disturb any earlier golden; it is deliberately last.
+    run("redact", "--config", "redact_config.yaml", "redact", "--check", "--file", "secrets.json")
     return out
 
 

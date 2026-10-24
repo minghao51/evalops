@@ -1,4 +1,5 @@
 """Backend-neutral scorers + normalization of any backend's score objects to floats."""
+
 from __future__ import annotations
 
 import inspect
@@ -10,16 +11,19 @@ FALSE_STR = {"no", "false", "fail", "failed", "incorrect", "n"}
 
 def scorer(name: str | None = None, *, llm: bool = False):
     """Decorate fn(*, inputs, outputs, expectations) -> float | bool | dict | Score-like."""
+
     def deco(fn: Callable):
         fn.evalops_name = name or fn.__name__
         fn.evalops_llm = llm
         return fn
+
     return deco
 
 
 def scorer_name(s) -> str:
-    return (getattr(s, "evalops_name", None) or getattr(s, "name", None)
-            or getattr(s, "__name__", None) or type(s).__name__)
+    return (
+        getattr(s, "evalops_name", None) or getattr(s, "name", None) or getattr(s, "__name__", None) or type(s).__name__
+    )
 
 
 def to_float(value: Any) -> float | None:

@@ -1,4 +1,5 @@
 """Role interfaces ("ports"). Plugins implement any subset; core code only talks to these."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -15,8 +16,8 @@ ROLES = ("prompts", "datasets", "ledger", "tracer", "evaluator")
 class LoadedPrompt:
     name: str
     version: str
-    template: Any                 # str or list of chat messages, using {{var}} placeholders
-    native: Any = None            # backend object, for apps that want it
+    template: Any  # str or list of chat messages, using {{var}} placeholders
+    native: Any = None  # backend object, for apps that want it
 
     def format(self, **variables):
         return render(self.template, variables)
@@ -39,7 +40,7 @@ class RowResult:
     trace_id: str | None = None
     usage: Usage | None = None
     error: str | None = None
-    trace: Any = None                     # evalops.traces.AgentTrace (normalized, framework-neutral)
+    trace: Any = None  # evalops.traces.AgentTrace (normalized, framework-neutral)
     trace_metrics: dict[str, float] = field(default_factory=dict)
 
 
@@ -62,6 +63,7 @@ class RunRecord:
 # ---------- base plugin ----------
 class Plugin:
     """Base class. `provides` lists the roles a plugin implements."""
+
     name = "base"
     provides: tuple[str, ...] = ()
 
@@ -123,8 +125,9 @@ class Ledger(ABC):
     def end_run(self, run_id: str, status: str = "FINISHED") -> None: ...
 
     @abstractmethod
-    def log(self, run_id: str, params: dict | None = None, metrics: dict | None = None,
-            tags: dict | None = None) -> None: ...
+    def log(
+        self, run_id: str, params: dict | None = None, metrics: dict | None = None, tags: dict | None = None
+    ) -> None: ...
 
     @abstractmethod
     def put_artifact(self, run_id: str, name: str, text: str) -> None: ...
@@ -133,8 +136,9 @@ class Ledger(ABC):
     def get_artifact(self, run_id: str, name: str) -> str: ...
 
     @abstractmethod
-    def find_runs(self, tags: dict | None = None, since_ms: int | None = None,
-                  limit: int | None = None) -> list[RunRecord]:
+    def find_runs(
+        self, tags: dict | None = None, since_ms: int | None = None, limit: int | None = None
+    ) -> list[RunRecord]:
         """Runs whose tags match all given key/values, newest first."""
 
 
@@ -152,7 +156,18 @@ class Tracer(ABC):
 
 class Evaluator(ABC):
     @abstractmethod
-    def evaluate(self, *, records: list[dict], dataset_physical: str, dataset_store: DatasetStore,
-                 predict_fn: Callable | None, scorers: list, tracer: Tracer, run_id: str, run_name: str,
-                 concurrency: dict, stored_rows: list[RowResult] | None = None) -> EvalResult:
+    def evaluate(
+        self,
+        *,
+        records: list[dict],
+        dataset_physical: str,
+        dataset_store: DatasetStore,
+        predict_fn: Callable | None,
+        scorers: list,
+        tracer: Tracer,
+        run_id: str,
+        run_name: str,
+        concurrency: dict,
+        stored_rows: list[RowResult] | None = None,
+    ) -> EvalResult:
         """Run predict_fn over records (or re-score stored_rows) and score every row."""

@@ -26,7 +26,7 @@ import json
 import pathlib
 import threading
 
-from .contract import formats
+from .contract import formats, redact
 from .util import EXIT_RUNTIME, EvalOpsError, FormatError, canonical, sha256
 
 _ctx: contextvars.ContextVar = contextvars.ContextVar("evalops_tools", default=None)
@@ -80,14 +80,37 @@ class Cassette:
         return sha256("\n".join(rows))[:12]
 
     def save(self) -> None:
+        """Write the cassette; the entries written are a redacted *deep copy* (CONTRACT §5.1).
+
+        `self.entries` and `fingerprint()` are identity inputs (`app_version` hashes the
+        fingerprint), so `save()` must not touch them: redaction happens on the copy that goes to
+        disk. The copy is normalized first (``json.dumps(default=str)`` round-trip), so a tuple,
+        set, dataclass or custom object cannot escape the walk while its ``str()`` is persisted.
+        `_meta` gains `redacted`/`redaction_rules` only when a rule actually changed something, and
+        those keys are metadata: the fingerprint never covers `_meta`.
+        """
         if not self.dirty or self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        meta_line = json.dumps({formats.META_KEY: formats.meta()}, sort_keys=True, default=str) + "\n"
-        self.path.write_text(
-            meta_line
-            + "".join(json.dumps(e, sort_keys=True, default=str) + "\n" for _, e in sorted(self.entries.items()))
+        redactor = redact.current()
+        payload = redact.normalize_json(dict(self.entries))
+        entries, changes = redactor.redact(payload)
+        extra = {"redacted": True, "redaction_rules": redactor.fingerprint()} if changes else {}
+        meta_line = json.dumps({formats.META_KEY: formats.meta(**extra)}, sort_keys=True, default=str) + "\n"
+        text = meta_line + "".join(
+            json.dumps(e, sort_keys=True, default=str) + "\n" for _, e in sorted(entries.items())
         )
+        if redactor.mode == "strict":  # refuse to persist a payload a rule still matches (exit 5)
+            residual = redactor.residual(entries)
+            if residual:
+                raise EvalOpsError(
+                    f"strict redaction: {self.path} would still contain {len(residual)} value(s) matching a "
+                    f"redaction rule (e.g. {residual[0]}); nothing was written",
+                    EXIT_RUNTIME,
+                    {"path": str(self.path), "paths": residual[:50]},
+                    hint="a redaction hook must be idempotent and return None for already-redacted input",
+                )
+        self.path.write_text(text)
         self.dirty = False
 
 
@@ -133,12 +156,30 @@ def replayable(name: str | None = None):
                 hit = cas.entries.get(key)
                 if hit is not None:
                     return key, hit, cas
-                cas.misses.append(f"{tool}({canonical(args)[:200]})")
+                # The replay failed, and the diagnostic is the only place the arguments can reach
+                # a sink (`misses` -> last_eval.json, `--json` data, the miss error message). It is
+                # therefore redacted here, at capture time, before any sink -- not at a boundary
+                # (CONTRACT §5.1). `fields`/`hash` cannot match a flat string; `patterns`/`hook` can.
+                label = redact.redact_string(f"{tool}({canonical(args)[:200]})")
+                redactor = redact.current()
+                if redactor.mode == "strict":  # never hand a still-matching value to the caller
+                    residual = redactor.residual(label)
+                    if residual:
+                        raise EvalOpsError(
+                            f"strict redaction: the replay-miss label for {tool} still matches "
+                            f"{len(residual)} rule(s) after redaction (e.g. {residual[0] or '<root>'}); "
+                            f"nothing was written",
+                            EXIT_RUNTIME,
+                            {
+                                "tool": tool,
+                                "source": "tool_replay_misses",
+                                "paths": residual[: redact.PATH_CAP],
+                            },
+                            hint="a redaction hook must be idempotent and return None for already-redacted input",
+                        )
+                cas.misses.append(label)
                 if cas.on_miss != "live":
-                    raise ToolReplayMiss(
-                        f"no recording for {tool}({canonical(args)[:200]}); "
-                        f"re-record with `evalops eval --tool-mode record`"
-                    )
+                    raise ToolReplayMiss(f"no recording for {label}; re-record with `evalops eval --tool-mode record`")
             return key, None, cas
 
         def replay(hit):

@@ -5,6 +5,7 @@ trace) only, via `formats.semantic()`, so backend metadata added to a stored rec
 a dataset's fingerprint. Lock readers use `locks.entries()`: the reserved `_meta` key is file
 metadata, never a dataset name.
 """
+
 import json
 import os
 from typing import Any
@@ -75,13 +76,19 @@ def sync(cfg: Any, reg: Any, check: bool = False) -> dict[str, Any]:
         raise EvalOpsError(f"declared datasets have no source file: {missing}", EXIT_USAGE)
     if check:
         if changed:
-            raise EvalOpsError("datasets out of sync with lock; run `evalops sync datasets`", EXIT_GUARD,
-                               {"changed": changed, "env": cfg.env})
+            raise EvalOpsError(
+                "datasets out of sync with lock; run `evalops sync datasets`",
+                EXIT_GUARD,
+                {"changed": changed, "env": cfg.env},
+            )
         return {"summary": "datasets in sync", "changed": []}
     if frozen_changed and not frozen_changes_approved():
-        raise EvalOpsError("frozen dataset content changed; needs approval "
-                           "(EVALOPS_ALLOW_FROZEN_CHANGE=true via an approved CI label)",
-                           EXIT_GUARD, {"frozen_changed": frozen_changed})
+        raise EvalOpsError(
+            "frozen dataset content changed; needs approval "
+            "(EVALOPS_ALLOW_FROZEN_CHANGE=true via an approved CI label)",
+            EXIT_GUARD,
+            {"frozen_changed": frozen_changed},
+        )
     if not changed:
         return {"summary": "datasets in sync", "synced": []}
 
@@ -95,8 +102,13 @@ def sync(cfg: Any, reg: Any, check: bool = False) -> dict[str, Any]:
         physical = store.physical_name(f"{name}__{fp[:8]}")
         if not store.exists(physical):  # content-addressed: an existing snapshot is never rewritten
             store.write(physical, records)
-        lock[name] = {"plugin": store.name, "physical": physical, "fingerprint": fp, "rows": len(records),
-                      "git_sha": git_sha(cwd=cfg.root)}
+        lock[name] = {
+            "plugin": store.name,
+            "physical": physical,
+            "fingerprint": fp,
+            "rows": len(records),
+            "git_sha": git_sha(cwd=cfg.root),
+        }
         synced.append(physical)
     locks.write(cfg, KIND, lock)
     return {"summary": f"synced {len(synced)} dataset(s) to {store.name}; commit the lock", "synced": synced}

@@ -3,11 +3,23 @@
 options: tracking_uri, registry_uri (e.g. databricks-uc), experiment, namespace (e.g. catalog.schema)
 API details verified against MLflow 3.x docs; re-verify on upgrades (marked VERIFY).
 """
+
 import os
 import time
 
-from ..ports import (DatasetStore, EvalResult, Evaluator, Ledger, LoadedPrompt, Plugin, PromptStore, RowResult,
-                     RunRecord, Tracer, Usage)
+from ..ports import (
+    DatasetStore,
+    EvalResult,
+    Evaluator,
+    Ledger,
+    LoadedPrompt,
+    Plugin,
+    PromptStore,
+    RowResult,
+    RunRecord,
+    Tracer,
+    Usage,
+)
 from ..scoring import call_scorer, scorer_name, to_float
 from .core import CorePlugin
 
@@ -40,13 +52,19 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
         self.client = mlflow.MlflowClient()
 
     def doctor(self):
-        return {"plugin": self.name, "ok": True, "tracking_uri": self.mlflow.get_tracking_uri(),
-                "experiment_id": self.exp_id, "mlflow_version": self.mlflow.__version__}
+        return {
+            "plugin": self.name,
+            "ok": True,
+            "tracking_uri": self.mlflow.get_tracking_uri(),
+            "experiment_id": self.exp_id,
+            "mlflow_version": self.mlflow.__version__,
+        }
 
     # ---------------- prompts ----------------
     def register(self, name, template, tags):
-        pv = self.mlflow.genai.register_prompt(name=name, template=template,
-                                               commit_message=f"evalops {tags.get('evalops.git_sha', '')}", tags=tags)
+        pv = self.mlflow.genai.register_prompt(
+            name=name, template=template, commit_message=f"evalops {tags.get('evalops.git_sha', '')}", tags=tags
+        )
         return str(pv.version)
 
     def load(self, name, version):
@@ -65,6 +83,7 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
     # ---------------- datasets ----------------
     def _ds(self):
         from mlflow.genai import datasets
+
         return datasets
 
     def exists(self, physical):
@@ -77,8 +96,11 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
     def write(self, physical, records):
         d = self._ds()
         ds = None
-        for kwargs in ({"name": physical, "experiment_id": self.exp_id}, {"name": physical},
-                       {"uc_table_name": physical}):  # VERIFY: signature varies by version/backend
+        for kwargs in (
+            {"name": physical, "experiment_id": self.exp_id},
+            {"name": physical},
+            {"uc_table_name": physical},
+        ):  # VERIFY: signature varies by version/backend
             try:
                 ds = d.create_dataset(**kwargs)
                 break
@@ -127,11 +149,19 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
             clauses.append(f"attributes.start_time >= {int(since_ms)}")
         out, token = [], None
         while True:
-            page = self.client.search_runs([self.exp_id], " and ".join(clauses),
-                                           order_by=["attributes.start_time DESC"],
-                                           max_results=min(limit or 1000, 1000), page_token=token)
-            out += [RunRecord(r.info.run_id, dict(r.data.tags), dict(r.data.params), dict(r.data.metrics),
-                              int(r.info.start_time)) for r in page]
+            page = self.client.search_runs(
+                [self.exp_id],
+                " and ".join(clauses),
+                order_by=["attributes.start_time DESC"],
+                max_results=min(limit or 1000, 1000),
+                page_token=token,
+            )
+            out += [
+                RunRecord(
+                    r.info.run_id, dict(r.data.tags), dict(r.data.params), dict(r.data.metrics), int(r.info.start_time)
+                )
+                for r in page
+            ]
             token = getattr(page, "token", None)
             if not token or (limit and len(out) >= limit):
                 return out[:limit] if limit else out
@@ -141,12 +171,14 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
         mlflow = self.mlflow
 
         def traced(**inputs):
-            with mlflow.start_span(name="evalops.row", attributes={"evalops.run_id": run_id,
-                                                                   "evalops.row_id": row_id}) as span:
+            with mlflow.start_span(
+                name="evalops.row", attributes={"evalops.run_id": run_id, "evalops.row_id": row_id}
+            ) as span:
                 span.set_inputs(inputs)
                 out = fn(**inputs)
                 span.set_outputs(out)
                 return out, getattr(span, "trace_id", None) or getattr(span, "request_id", None)
+
         return traced
 
     def usage(self, trace_ids):
@@ -179,6 +211,7 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
             def fn(inputs, outputs, expectations, _s=s):
                 res = call_scorer(_s, inputs=inputs, outputs=outputs, expectations=expectations)
                 return next(iter(res.values()), None)
+
             fn.__name__ = name
             try:
                 out.append(mlflow_scorer(name=name)(fn))
@@ -186,13 +219,33 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
                 out.append(mlflow_scorer(fn))
         return out
 
-    def evaluate(self, *, records, dataset_physical, dataset_store, predict_fn, scorers, tracer, run_id, run_name,
-                 concurrency, stored_rows=None):
+    def evaluate(
+        self,
+        *,
+        records,
+        dataset_physical,
+        dataset_store,
+        predict_fn,
+        scorers,
+        tracer,
+        run_id,
+        run_name,
+        concurrency,
+        stored_rows=None,
+    ):
         if stored_rows is not None:  # judge-only: core re-scores stored outputs with any scorer type
-            return CorePlugin(self.cfg, {}).evaluate(records=records, dataset_physical=dataset_physical,
-                                                     dataset_store=dataset_store, predict_fn=None, scorers=scorers,
-                                                     tracer=self, run_id=run_id, run_name=run_name,
-                                                     concurrency=concurrency, stored_rows=stored_rows)
+            return CorePlugin(self.cfg, {}).evaluate(
+                records=records,
+                dataset_physical=dataset_physical,
+                dataset_store=dataset_store,
+                predict_fn=None,
+                scorers=scorers,
+                tracer=self,
+                run_id=run_id,
+                run_name=run_name,
+                concurrency=concurrency,
+                stored_rows=stored_rows,
+            )
         os.environ.setdefault("MLFLOW_GENAI_EVAL_MAX_WORKERS", str(concurrency.get("max_workers", 4)))
         os.environ.setdefault("MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS", str(concurrency.get("max_scorer_workers", 2)))
         data = dataset_store.native(dataset_physical) if dataset_store is self else records
@@ -205,11 +258,17 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
         if df is not None:
             for i, (_, r) in enumerate(df.iterrows()):
                 get = r.get if hasattr(r, "get") else (lambda k, d=None: d)
-                scores = {c[:-len("/value")]: to_float(r[c]) for c in df.columns if str(c).endswith("/value")}
-                rows.append(RowResult(row_id=f"{i:05d}", inputs=get("inputs", get("request")) or {},
-                                      outputs=get("outputs", get("response")), expectations=get("expectations"),
-                                      scores={k: v for k, v in scores.items() if v is not None},
-                                      trace_id=get("trace_id")))
+                scores = {c[: -len("/value")]: to_float(r[c]) for c in df.columns if str(c).endswith("/value")}
+                rows.append(
+                    RowResult(
+                        row_id=f"{i:05d}",
+                        inputs=get("inputs", get("request")) or {},
+                        outputs=get("outputs", get("response")),
+                        expectations=get("expectations"),
+                        scores={k: v for k, v in scores.items() if v is not None},
+                        trace_id=get("trace_id"),
+                    )
+                )
             usage = self.usage([r.trace_id for r in rows if r.trace_id])
             for r in rows:
                 r.usage = usage.get(r.trace_id)

@@ -6,6 +6,7 @@ Notes: prompt versions are immutable; labels are pointers (one version per label
 new_labels REPLACES the labels on a version, so set_alias keeps the version's existing labels.
 Methods marked VERIFY are best-effort against SDK changes.
 """
+
 import hashlib
 import time
 
@@ -31,8 +32,13 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
 
     # ---------------- prompts ----------------
     def register(self, name, template, tags):
-        p = self.lf.create_prompt(name=name, prompt=template, type="chat" if isinstance(template, list) else "text",
-                                  labels=[], config={"evalops": tags})
+        p = self.lf.create_prompt(
+            name=name,
+            prompt=template,
+            type="chat" if isinstance(template, list) else "text",
+            labels=[],
+            config={"evalops": tags},
+        )
         return str(p.version)
 
     def _get(self, name, **kw):
@@ -68,8 +74,9 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         self.lf.create_dataset(name=physical, metadata={"created_by": "evalops"})
         for r in records:  # stable ids make retries idempotent
             item_id = hashlib.sha256(f"{physical}:{canonical(r)}".encode()).hexdigest()[:32]
-            self.lf.create_dataset_item(dataset_name=physical, id=item_id, input=r["inputs"],
-                                        expected_output=r.get("expectations"))
+            self.lf.create_dataset_item(
+                dataset_name=physical, id=item_id, input=r["inputs"], expected_output=r.get("expectations")
+            )
         self.lf.flush()
 
     def read(self, physical):
@@ -89,11 +96,16 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         lf = self.lf
 
         def traced(**inputs):
-            with lf.start_as_current_observation(as_type="span", name="evalops.row", input=inputs,
-                                                 metadata={"evalops_run_id": run_id, "evalops_row_id": row_id}) as obs:
+            with lf.start_as_current_observation(
+                as_type="span",
+                name="evalops.row",
+                input=inputs,
+                metadata={"evalops_run_id": run_id, "evalops_row_id": row_id},
+            ) as obs:
                 out = fn(**inputs)
                 obs.update(output=out)
                 return out, getattr(obs, "trace_id", None)
+
         return traced
 
     def usage(self, trace_ids):
@@ -120,13 +132,33 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         self.lf.flush()
 
     # ---------------- evaluator (native experiment runner) ----------------
-    def evaluate(self, *, records, dataset_physical, dataset_store, predict_fn, scorers, tracer, run_id, run_name,
-                 concurrency, stored_rows=None):
+    def evaluate(
+        self,
+        *,
+        records,
+        dataset_physical,
+        dataset_store,
+        predict_fn,
+        scorers,
+        tracer,
+        run_id,
+        run_name,
+        concurrency,
+        stored_rows=None,
+    ):
         if stored_rows is not None:
-            return CorePlugin(self.cfg, {}).evaluate(records=records, dataset_physical=dataset_physical,
-                                                     dataset_store=dataset_store, predict_fn=None, scorers=scorers,
-                                                     tracer=self, run_id=run_id, run_name=run_name,
-                                                     concurrency=concurrency, stored_rows=stored_rows)
+            return CorePlugin(self.cfg, {}).evaluate(
+                records=records,
+                dataset_physical=dataset_physical,
+                dataset_store=dataset_store,
+                predict_fn=None,
+                scorers=scorers,
+                tracer=self,
+                run_id=run_id,
+                run_name=run_name,
+                concurrency=concurrency,
+                stored_rows=stored_rows,
+            )
         from langfuse import Evaluation
 
         def task(*, item, **kwargs):
@@ -137,10 +169,17 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
             def ev(*, input, output, expected_output=None, **kwargs):  # noqa: A002 (Langfuse signature)
                 res = call_scorer(s, inputs=input, outputs=output, expectations=expected_output)
                 return [Evaluation(name=k, value=v) for k, v in res.items()]
+
             return ev
 
-        kwargs = dict(name=run_name, run_name=run_name, task=task, evaluators=[make(s) for s in scorers],
-                      max_concurrency=int(concurrency.get("max_workers", 4)), metadata={"evalops_run_id": run_id})
+        kwargs = dict(
+            name=run_name,
+            run_name=run_name,
+            task=task,
+            evaluators=[make(s) for s in scorers],
+            max_concurrency=int(concurrency.get("max_workers", 4)),
+            metadata={"evalops_run_id": run_id},
+        )
         if dataset_store is self:
             result = self.native(dataset_physical).run_experiment(**kwargs)
         else:  # VERIFY: top-level runner over local data
@@ -151,17 +190,34 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         rows = []
         for i, ir in enumerate(getattr(result, "item_results", []) or []):
             item = getattr(ir, "item", None)
-            inp = getattr(item, "input", None) if item is not None and not isinstance(item, dict) else (item or {}).get("input")
-            exp = (getattr(item, "expected_output", None) if item is not None and not isinstance(item, dict)
-                   else (item or {}).get("expected_output"))
-            scores = {getattr(e, "name", f"s{j}"): to_float(getattr(e, "value", None))
-                      for j, e in enumerate(getattr(ir, "evaluations", []) or [])}
-            rows.append(RowResult(row_id=f"{i:05d}", inputs=inp or {}, outputs=getattr(ir, "output", None),
-                                  expectations=exp, scores={k: v for k, v in scores.items() if v is not None},
-                                  trace_id=getattr(ir, "trace_id", None)))
+            inp = (
+                getattr(item, "input", None)
+                if item is not None and not isinstance(item, dict)
+                else (item or {}).get("input")
+            )
+            exp = (
+                getattr(item, "expected_output", None)
+                if item is not None and not isinstance(item, dict)
+                else (item or {}).get("expected_output")
+            )
+            scores = {
+                getattr(e, "name", f"s{j}"): to_float(getattr(e, "value", None))
+                for j, e in enumerate(getattr(ir, "evaluations", []) or [])
+            }
+            rows.append(
+                RowResult(
+                    row_id=f"{i:05d}",
+                    inputs=inp or {},
+                    outputs=getattr(ir, "output", None),
+                    expectations=exp,
+                    scores={k: v for k, v in scores.items() if v is not None},
+                    trace_id=getattr(ir, "trace_id", None),
+                )
+            )
         usage = self.usage([r.trace_id for r in rows if r.trace_id])
         for r in rows:
             r.usage = usage.get(r.trace_id)
         from ..scoring import aggregate_rows
+
         ref = getattr(result, "dataset_run_url", None) or getattr(result, "dataset_run_id", None)
         return EvalResult(rows=rows, metrics=aggregate_rows(rows), native_ref=f"langfuse:{ref}" if ref else None)

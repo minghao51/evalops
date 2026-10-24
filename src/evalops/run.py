@@ -12,7 +12,7 @@ from . import cost, locks
 from . import datasets as ds_mod
 from . import prompts as pr_mod
 from . import tools as tools_mod
-from .contract import formats
+from .contract import formats, redact
 from .ports import DatasetStore, Evaluator, Ledger, RowResult, Tracer
 from .registry import Registry
 from .scoring import aggregate_rows, call_scorer, scorer_name, wants_trace
@@ -63,10 +63,20 @@ def plan(cfg, dataset, stage, repeats=None, judge_only=False) -> dict:
     }
 
 
-def _put_artifact(ledger: Ledger, run_id: str, artifacts: dict[str, str], name: str, text: str) -> None:
-    """Write one run artifact and remember its exact text for evalops/manifest.json."""
-    artifacts[name] = text
-    ledger.put_artifact(run_id, name, text)
+def _put_artifact(cfg, artifacts: dict[str, str], name: str, text: str) -> str:
+    """Redact one artifact *payload* and remember its exact *stored* text; nothing is written here.
+
+    This is the artifact redaction boundary (CONTRACT §5.1): the payload is redacted here, after
+    `app_version`/`cfg_hash` were computed, so the manifest hashes the bytes that will be stored.
+    Only run payloads pass through it (`evalops/cost_estimate.json`, both locks,
+    `evalops/rows.jsonl`, the last one being line-delimited JSON and so taking the JSONL path);
+    `evalops/manifest.json` is derived metadata and is written verbatim, never redacted.
+    `evaluate` buffers every payload and writes them only once all are verified, so a `strict`
+    refusal cannot leave a partial run behind. Returns the stored text.
+    """
+    stored = redact.enforce_artifact(cfg, name, text)
+    artifacts[name] = stored
+    return stored
 
 
 def row_to_json(r: RowResult, max_payload_chars) -> dict:
@@ -140,6 +150,42 @@ def _post_score(rows, scorers):
 
 
 def evaluate(
+    cfg,
+    dataset,
+    stage,
+    repeats=None,
+    judge_only=False,
+    source_group=None,
+    allow_dirty=False,
+    override_budget=False,
+    dry_run=False,
+    tool_mode=None,
+    kind="eval",
+    scorer_filter=None,
+) -> dict:
+    """Run one evaluation, bound to `cfg`'s redaction rules for the whole run.
+
+    The binding is scoped (`redact.use`), so a failure -- including a `strict` refusal -- restores
+    whatever redactor was active before instead of leaving this config's rules behind.
+    """
+    with redact.use(cfg):
+        return _evaluate(
+            cfg,
+            dataset,
+            stage,
+            repeats=repeats,
+            judge_only=judge_only,
+            source_group=source_group,
+            allow_dirty=allow_dirty,
+            override_budget=override_budget,
+            dry_run=dry_run,
+            tool_mode=tool_mode,
+            kind=kind,
+            scorer_filter=scorer_filter,
+        )
+
+
+def _evaluate(
     cfg,
     dataset,
     stage,
@@ -249,6 +295,7 @@ def evaluate(
         )
         status = "FAILED"
         artifacts: dict[str, str] = {}
+        pending: list[tuple[str, str]] = []
         try:
             ledger.log(
                 run_id,
@@ -273,23 +320,18 @@ def evaluate(
                     "behavior_config": canonical(full_cfg)[:4000],
                 },
             )
-            _put_artifact(
-                ledger, run_id, artifacts, cost.ESTIMATE_ARTIFACT, json.dumps(formats.stamp(est), sort_keys=True)
-            )
-            _put_artifact(
-                ledger,
-                run_id,
-                artifacts,
-                "evalops/prompts.lock.json",
-                json.dumps(locks.document(plock), sort_keys=True),
-            )
-            _put_artifact(
-                ledger,
-                run_id,
-                artifacts,
-                "evalops/datasets.lock.json",
-                json.dumps(locks.document(locks.read(cfg, ds_mod.KIND)), sort_keys=True),
-            )
+            # Buffer the metadata artifacts: nothing is written until every payload has been
+            # redacted and verified (CONTRACT §5.1, strict is atomic). The manifest (staged after the
+            # rows) hashes exactly these *stored* texts.
+            for name, body in (
+                (cost.ESTIMATE_ARTIFACT, json.dumps(formats.stamp(est), sort_keys=True)),
+                ("evalops/prompts.lock.json", json.dumps(locks.document(plock), sort_keys=True)),
+                (
+                    "evalops/datasets.lock.json",
+                    json.dumps(locks.document(locks.read(cfg, ds_mod.KIND)), sort_keys=True),
+                ),
+            ):
+                pending.append((name, _put_artifact(cfg, artifacts, name, body)))
 
             stash: dict = {}
             fn = predict_fn
@@ -316,19 +358,23 @@ def evaluate(
                         r.trace_metrics = r.trace.metrics()
                 _post_score(result.rows, trace_scorers)
                 result.metrics = {**result.metrics, **aggregate_rows(result.rows)}
+
+            rows_text = "".join(
+                json.dumps(formats.stamp(row_to_json(r, max_payload)), default=str) + "\n" for r in result.rows
+            )
+            pending.append(("evalops/rows.jsonl", _put_artifact(cfg, artifacts, "evalops/rows.jsonl", rows_text)))
+            # Derived metadata, staged last: the manifest hashes the *stored* texts above and is
+            # written verbatim. It is never redacted and never strict-rescanned -- a rule matching a
+            # digest (e.g. `[0-9a-f]{64}`) or the `{"artifacts": {...}}` shape would otherwise
+            # rewrite the hashes and silently break the integrity of what was stored.
+            manifest_text = json.dumps(formats.manifest(artifacts))
+            pending.append(("evalops/manifest.json", manifest_text))
+            # `save()` is verified independently; running it before the artifact loop means its own
+            # strict refusal still leaves no artifact, and a rows refusal never writes a cassette.
             if mode == "record":
                 cassette.save()
-
-            _put_artifact(
-                ledger,
-                run_id,
-                artifacts,
-                "evalops/rows.jsonl",
-                "".join(
-                    json.dumps(formats.stamp(row_to_json(r, max_payload)), default=str) + "\n" for r in result.rows
-                ),
-            )
-            ledger.put_artifact(run_id, "evalops/manifest.json", json.dumps(formats.manifest(artifacts)))
+            for name, stored_text in pending:
+                ledger.put_artifact(run_id, name, stored_text)
             rows_n = max(dlock["rows"], 1)
             measured = cost.measure(cfg, result.rows) if stored is None else cost.measure(cfg, [])
             judge_usd = round(rows_n * n_llm * cost.judge_cost_per_call(cfg), 6)

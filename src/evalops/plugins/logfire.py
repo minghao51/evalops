@@ -10,6 +10,7 @@ Usage lookup relies on your LLM instrumentation (e.g. logfire.instrument_openai(
 gen_ai.usage.* attributes; otherwise use evalops.report_usage() in predict_fn. VERIFY the SQL
 against your Logfire version.
 """
+
 import time
 
 from ..ports import Plugin, Tracer, Usage
@@ -25,8 +26,10 @@ class LogfirePlugin(Plugin, Tracer):
 
         self.logfire = logfire
         if options.get("configure", True):
-            logfire.configure(service_name=options.get("service_name", "evalops"),
-                              send_to_logfire=options.get("send_to_logfire", "if-token-present"))
+            logfire.configure(
+                service_name=options.get("service_name", "evalops"),
+                send_to_logfire=options.get("send_to_logfire", "if-token-present"),
+            )
         self._started = time.time()
 
     def doctor(self):
@@ -43,6 +46,7 @@ class LogfirePlugin(Plugin, Tracer):
                 span.set_attribute("outputs", str(out)[:10000])
                 tid = otel.get_current_span().get_span_context().trace_id
                 return out, format(tid, "032x")
+
         return traced
 
     def flush(self):
@@ -57,9 +61,11 @@ class LogfirePlugin(Plugin, Tracer):
         ia = self.options.get("input_tokens_attr", "gen_ai.usage.input_tokens")
         oa = self.options.get("output_tokens_attr", "gen_ai.usage.output_tokens")
         ids = ", ".join(f"'{t}'" for t in trace_ids if all(c in "0123456789abcdef" for c in t))
-        sql = (f"SELECT trace_id, SUM(CAST(attributes->>'{ia}' AS BIGINT)) AS i, "
-               f"SUM(CAST(attributes->>'{oa}' AS BIGINT)) AS o FROM records "
-               f"WHERE trace_id IN ({ids}) GROUP BY trace_id")
+        sql = (
+            f"SELECT trace_id, SUM(CAST(attributes->>'{ia}' AS BIGINT)) AS i, "
+            f"SUM(CAST(attributes->>'{oa}' AS BIGINT)) AS o FROM records "
+            f"WHERE trace_id IN ({ids}) GROUP BY trace_id"
+        )
         found = {}
         with LogfireQueryClient(read_token=token) as client:
             for _ in range(int(self.options.get("usage_retries", 5))):  # ingestion is asynchronous

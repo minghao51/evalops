@@ -7,6 +7,7 @@ Each eval row runs inside `row_capture(...)`. Spans from any capture path land i
   * OpenAI Agents SDK: evalops.traces.openai_agents_processor().
 No backend round-trip is needed, so there is no ingestion delay and scoring is backend-independent.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -168,8 +169,10 @@ def row_capture(row_id: str, limits: dict | None = None, attributes: dict | None
     root = contextlib.nullcontext()
     if _installed:
         from opentelemetry import trace
+
         root = trace.get_tracer("evalops").start_as_current_span(
-            "evalops.row", attributes={"evalops.row_id": row_id, **(attributes or {})})
+            "evalops.row", attributes={"evalops.row_id": row_id, **(attributes or {})}
+        )
     try:
         with root as span:
             if span is not None:

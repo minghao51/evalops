@@ -3,6 +3,7 @@
 Use it when your tracer cannot report tokens/cost (e.g. tracer 'none', or a custom model client).
 Reported usage takes precedence over tracer-derived usage for that row.
 """
+
 import contextlib
 import contextvars
 

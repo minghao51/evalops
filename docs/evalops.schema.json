@@ -211,6 +211,9 @@
           "title": "Project",
           "type": "string"
         },
+        "redact": {
+          "$ref": "#/$defs/RedactConfig"
+        },
         "tools": {
           "$ref": "#/$defs/ToolsConfig"
         },
@@ -663,6 +666,88 @@
       "title": "PricesPerMillionTokens",
       "type": "object"
     },
+    "RedactConfig": {
+      "additionalProperties": false,
+      "description": "`redact:` -- the payload redaction hook (CONTRACT \u00a75.1).\n\n`mode: off` (the default) writes every byte exactly as evalops did before redaction existed;\n`strict` redacts and then re-scans, refusing to persist a payload that still matches a rule\n(exit 5). `EVALOPS_REDACT` overrides `mode` at run time. The glob syntax, the rule order and the\nidempotence contract live in `evalops.contract.redact`.",
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "hash": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hash",
+          "type": "array"
+        },
+        "hook": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hook"
+        },
+        "mode": {
+          "default": "off",
+          "enum": [
+            "strict",
+            "off"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "$ref": "#/$defs/RedactPattern"
+          },
+          "title": "Patterns",
+          "type": "array"
+        }
+      },
+      "title": "RedactConfig",
+      "type": "object"
+    },
+    "RedactPattern": {
+      "additionalProperties": false,
+      "description": "One `redact.patterns` rule: `regex` is substituted on every string leaf with `replace`.\n\nThe regex is compiled at validation time, so an invalid one is exit 2 naming the pattern\ninstead of a crash on the first payload.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "regex": {
+          "title": "Regex",
+          "type": "string"
+        },
+        "replace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replace"
+        }
+      },
+      "required": [
+        "name",
+        "regex"
+      ],
+      "title": "RedactPattern",
+      "type": "object"
+    },
     "ReliabilityRule": {
       "additionalProperties": false,
       "properties": {
@@ -910,6 +995,9 @@
     "project": {
       "title": "Project",
       "type": "string"
+    },
+    "redact": {
+      "$ref": "#/$defs/RedactConfig"
     },
     "tools": {
       "$ref": "#/$defs/ToolsConfig"

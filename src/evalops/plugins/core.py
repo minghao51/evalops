@@ -5,6 +5,7 @@ exponential backoff + jitter, an optional requests-per-minute limiter, and async
 It works with ANY tracer plugin (MLflow, Langfuse, LangSmith, Logfire, none) and any scorer that
 accepts (inputs, outputs, expectations) keyword arguments, including MLflow's built-in judges.
 """
+
 import asyncio
 import inspect
 import random
@@ -45,6 +46,7 @@ def _syncify(fn, timeout):
 
     def run(**kwargs):
         return asyncio.run(asyncio.wait_for(fn(**kwargs), timeout))
+
     return run
 
 
@@ -58,7 +60,7 @@ def _retry(call, retries, backoff, limiter):
         except Exception:  # noqa: BLE001
             if attempt == retries:
                 raise
-            time.sleep(backoff * (2 ** attempt) + random.uniform(0, backoff))
+            time.sleep(backoff * (2**attempt) + random.uniform(0, backoff))
 
 
 class CorePlugin(Plugin, Tracer, Evaluator):
@@ -69,11 +71,24 @@ class CorePlugin(Plugin, Tracer, Evaluator):
     def wrap(self, fn, *, run_id, row_id):
         def traced(**inputs):
             return fn(**inputs), None
+
         return traced
 
     # ---- evaluator ----
-    def evaluate(self, *, records, dataset_physical, dataset_store, predict_fn, scorers, tracer, run_id,
-                 run_name, concurrency, stored_rows=None):
+    def evaluate(
+        self,
+        *,
+        records,
+        dataset_physical,
+        dataset_store,
+        predict_fn,
+        scorers,
+        tracer,
+        run_id,
+        run_name,
+        concurrency,
+        stored_rows=None,
+    ):
         workers = int(concurrency.get("max_workers", 4))
         scorer_workers = max(1, min(int(concurrency.get("max_scorer_workers", 2)), len(scorers) or 1))
         retries = int(concurrency.get("retries", 3))
@@ -84,17 +99,23 @@ class CorePlugin(Plugin, Tracer, Evaluator):
         predict = _syncify(predict_fn, timeout) if predict_fn else None
         tcfg = self.cfg.section("traces")
         if tcfg.get("capture", True):
-            trace_capture.install_otel()       # no-op when OpenTelemetry isn't installed
+            trace_capture.install_otel()  # no-op when OpenTelemetry isn't installed
             instrument(tcfg.get("instrument") or [])
 
         def score(row: RowResult):
             def one(s):
                 try:
-                    return _retry(lambda: call_scorer(s, inputs=row.inputs, outputs=row.outputs,
-                                                      expectations=row.expectations, trace=row.trace),
-                                  retries, backoff, limiter)
+                    return _retry(
+                        lambda: call_scorer(
+                            s, inputs=row.inputs, outputs=row.outputs, expectations=row.expectations, trace=row.trace
+                        ),
+                        retries,
+                        backoff,
+                        limiter,
+                    )
                 except Exception as e:  # noqa: BLE001
                     return {"__error__": f"{scorer_name(s)}: {type(e).__name__}: {e}"}
+
             with ThreadPoolExecutor(scorer_workers) as pool:
                 for res in pool.map(one, scorers):
                     if "__error__" in res:
@@ -110,8 +131,10 @@ class CorePlugin(Plugin, Tracer, Evaluator):
             caps = []
 
             def attempt():  # fresh capture per attempt: a failed attempt's spans never pollute the trace
-                with trace_capture.row_capture(row.row_id, limits, {"evalops.run_id": run_id}) as cap, \
-                        collect() as usage:
+                with (
+                    trace_capture.row_capture(row.row_id, limits, {"evalops.run_id": run_id}) as cap,
+                    collect() as usage,
+                ):
                     caps.append((cap, usage))
                     return traced(**row.inputs)
 
@@ -135,16 +158,32 @@ class CorePlugin(Plugin, Tracer, Evaluator):
 
         with ThreadPoolExecutor(workers) as pool:
             if stored_rows is not None:  # judge-only: re-score stored outputs, no generation
-                rows = list(pool.map(score, [RowResult(r.row_id, r.inputs, r.outputs, r.expectations,
-                                                       trace_id=r.trace_id, trace=r.trace,
-                                                       trace_metrics=dict(r.trace_metrics))
-                                             for r in stored_rows]))
+                rows = list(
+                    pool.map(
+                        score,
+                        [
+                            RowResult(
+                                r.row_id,
+                                r.inputs,
+                                r.outputs,
+                                r.expectations,
+                                trace_id=r.trace_id,
+                                trace=r.trace,
+                                trace_metrics=dict(r.trace_metrics),
+                            )
+                            for r in stored_rows
+                        ],
+                    )
+                )
             else:
                 rows = list(pool.map(run_row, enumerate(records)))
         tracer.flush()
 
-        missing = [r.trace_id for r in rows if r.trace_id and r.usage is None
-                   and not (r.trace is not None and any(r.trace.tokens()))]
+        missing = [
+            r.trace_id
+            for r in rows
+            if r.trace_id and r.usage is None and not (r.trace is not None and any(r.trace.tokens()))
+        ]
         if missing:
             found = tracer.usage(missing)
             for r in rows:
@@ -152,6 +191,7 @@ class CorePlugin(Plugin, Tracer, Evaluator):
                     r.usage = found[r.trace_id]
         metrics = aggregate_rows(rows)
         metrics["error_rate"] = sum(1 for r in rows if r.error) / max(len(rows), 1)
-        metrics["budget_exceeded_rate"] = sum(1 for r in rows if (r.error or "").startswith("budget_exceeded")) \
-            / max(len(rows), 1)
+        metrics["budget_exceeded_rate"] = sum(1 for r in rows if (r.error or "").startswith("budget_exceeded")) / max(
+            len(rows), 1
+        )
         return EvalResult(rows=rows, metrics=metrics)

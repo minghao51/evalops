@@ -3,6 +3,7 @@
 Core logic never imports a vendor SDK. Backends (MLflow, Langfuse, LangSmith, Logfire, git, SQL...)
 are plugins implementing one or more *roles*: prompts, datasets, ledger, tracer, evaluator.
 """
+
 __version__ = "0.3.0"
 
 from .scoring import scorer  # noqa: E402,F401

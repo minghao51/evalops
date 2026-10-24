@@ -5,6 +5,7 @@ Static only (safe to run before `sync`): lock freshness is checked by `evalops s
 Flags direct calls to any backend's write APIs for prompts/datasets/evaluations in project code.
 Extend or override the list with guard.forbidden_calls in evalops.yaml.
 """
+
 import re
 
 from . import datasets as ds_mod
@@ -12,19 +13,31 @@ from .util import EXIT_GUARD, EvalOpsError
 
 DEFAULT_FORBIDDEN = [
     # MLflow
-    "register_prompt(", "set_prompt_alias(", "delete_prompt(", "merge_records(", "genai.evaluate(",
+    "register_prompt(",
+    "set_prompt_alias(",
+    "delete_prompt(",
+    "merge_records(",
+    "genai.evaluate(",
     # Langfuse
-    "create_prompt(", "update_prompt(", "create_dataset_item(", "run_experiment(",
+    "create_prompt(",
+    "update_prompt(",
+    "create_dataset_item(",
+    "run_experiment(",
     # LangSmith
-    "push_prompt(", "create_commit(", "create_examples(", "create_example(", "langsmith.evaluate(",
-    "client.evaluate(", "aevaluate(",
+    "push_prompt(",
+    "create_commit(",
+    "create_examples(",
+    "create_example(",
+    "langsmith.evaluate(",
+    "client.evaluate(",
+    "aevaluate(",
     # shared names
     "create_dataset(",
 ]
 ALIAS_LOAD = [
     re.compile(r"""load_prompt\(\s*(?:name_or_uri\s*=\s*)?f?["']prompts:/[^"']*@"""),  # MLflow alias
-    re.compile(r"""get_prompt\([^)]*label\s*="""),                                     # Langfuse label
-    re.compile(r"""pull_prompt\(\s*f?["'][^"':]+:[A-Za-z_-]+["']"""),                    # LangSmith tag
+    re.compile(r"""get_prompt\([^)]*label\s*="""),  # Langfuse label
+    re.compile(r"""pull_prompt\(\s*f?["'][^"':]+:[A-Za-z_-]+["']"""),  # LangSmith tag
 ]
 
 

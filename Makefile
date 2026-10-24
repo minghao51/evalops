@@ -20,13 +20,11 @@ test-standalone:  ; $(PYTHON) tests/run_without_pytest.py
 
 lint:
 	$(PYTHON) -m ruff check .
-	# src/ is being refactored concurrently in this phase; enforce formatting on the tree this
-	# WP owns. Run `ruff format src tests` once src/ is quiet, then drop this scope.
-	$(PYTHON) -m ruff format --check tests
+	$(PYTHON) -m ruff format --check src tests
 
 fmt:
-	$(PYTHON) -m ruff check --fix tests
-	$(PYTHON) -m ruff format tests
+	$(PYTHON) -m ruff check --fix src tests
+	$(PYTHON) -m ruff format src tests
 
 typecheck: ; $(PYTHON) -m mypy
 

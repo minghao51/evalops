@@ -10,6 +10,7 @@
 * Outside an evalops row, langchain_callbacks() returns [] so production code is unaffected.
 Use either this OR an OTel instrumentor for LangChain (OpenInference), not both, to avoid duplicates.
 """
+
 from __future__ import annotations
 
 import time
@@ -48,7 +49,7 @@ def _usage_from_result(response) -> tuple[int, int]:
 
 
 class EvalopsCallbackHandler(_Base):
-    raise_error = True      # let BudgetExceeded abort the run
+    raise_error = True  # let BudgetExceeded abort the run
     run_inline = True
 
     def __init__(self, capture, nodes_as_agents: bool = True):
@@ -66,8 +67,15 @@ class EvalopsCallbackHandler(_Base):
 
     # ---- helpers ----
     def _start(self, run_id, parent_run_id, name, kind, inputs=None, **fields):
-        s = Span(span_id=str(run_id), parent_id=str(parent_run_id) if parent_run_id else None, name=name or kind,
-                 kind=kind, start_ns=time.time_ns(), inputs=inputs, **fields)
+        s = Span(
+            span_id=str(run_id),
+            parent_id=str(parent_run_id) if parent_run_id else None,
+            name=name or kind,
+            kind=kind,
+            start_ns=time.time_ns(),
+            inputs=inputs,
+            **fields,
+        )
         self.open[str(run_id)] = s
         return s
 
@@ -86,9 +94,15 @@ class EvalopsCallbackHandler(_Base):
         name = kw.get("name") or (serialized or {}).get("name") or ((serialized or {}).get("id") or ["chain"])[-1]
         node = (metadata or {}).get("langgraph_node")
         is_node = self.nodes_as_agents and node and name == node
-        self._start(run_id, parent_run_id, name, "agent" if is_node else "chain", inputs=inputs,
-                    agent_name=node if is_node else None,
-                    attributes={"langgraph_node": node} if node else {})
+        self._start(
+            run_id,
+            parent_run_id,
+            name,
+            "agent" if is_node else "chain",
+            inputs=inputs,
+            agent_name=node if is_node else None,
+            attributes={"langgraph_node": node} if node else {},
+        )
 
     def on_chain_end(self, outputs, *, run_id, **kw):
         self._end(run_id, outputs)
@@ -100,8 +114,9 @@ class EvalopsCallbackHandler(_Base):
     def on_tool_start(self, serialized, input_str, *, run_id, parent_run_id=None, inputs=None, **kw):
         self.cap.step_started()  # may raise BudgetExceeded -> aborts before the tool runs
         name = kw.get("name") or (serialized or {}).get("name") or "tool"
-        self._start(run_id, parent_run_id, name, "tool", inputs=inputs if inputs is not None else input_str,
-                    tool_name=name)
+        self._start(
+            run_id, parent_run_id, name, "tool", inputs=inputs if inputs is not None else input_str, tool_name=name
+        )
 
     def on_tool_end(self, output, *, run_id, **kw):
         self._end(run_id, _content(output))

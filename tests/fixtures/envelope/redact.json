@@ -1,0 +1,24 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "redact",
+  "env": "local",
+  "data": {
+    "summary": "redact check (strict): 2 change(s) in 1 sink(s)",
+    "mode": "strict",
+    "changed": 2,
+    "sinks": [
+      {
+        "sink": "file:secrets.json",
+        "changes": 2,
+        "paths": [
+          "inputs.password",
+          "inputs.note"
+        ],
+        "truncated": false
+      }
+    ]
+  },
+  "errors": []
+}

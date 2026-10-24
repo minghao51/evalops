@@ -1,4 +1,5 @@
 """Plugin discovery: built-ins, installed entry points (group 'evalops.plugins'), or 'module:Class'."""
+
 from __future__ import annotations
 
 from importlib.metadata import entry_points
@@ -17,8 +18,13 @@ BUILTIN = {
     "langsmith": "evalops.plugins.langsmith:LangsmithPlugin",
     "logfire": "evalops.plugins.logfire:LogfirePlugin",
 }
-ROLE_TYPES = {"prompts": PromptStore, "datasets": DatasetStore, "ledger": Ledger, "tracer": Tracer,
-              "evaluator": Evaluator}
+ROLE_TYPES = {
+    "prompts": PromptStore,
+    "datasets": DatasetStore,
+    "ledger": Ledger,
+    "tracer": Tracer,
+    "evaluator": Evaluator,
+}
 
 
 def available() -> dict[str, str]:
@@ -53,8 +59,9 @@ class Registry:
         plugin_name = self.cfg.plugins[role]
         inst = self._instance(plugin_name)
         if role not in inst.provides or not isinstance(inst, ROLE_TYPES[role]):
-            raise CapabilityError(inst.name, f"role '{role}'",
-                                  f"It provides {list(inst.provides)}. Choose another plugin for '{role}'.")
+            raise CapabilityError(
+                inst.name, f"role '{role}'", f"It provides {list(inst.provides)}. Choose another plugin for '{role}'."
+            )
         return inst
 
     def describe(self) -> dict:

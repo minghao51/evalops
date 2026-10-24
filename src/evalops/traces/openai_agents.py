@@ -9,6 +9,7 @@ guardrail, custom. The SDK swallows processor exceptions, so the circuit breaker
 from here: rely on max_turns plus eval.row_limits.max_seconds (async timeout). VERIFY span_data fields
 against your SDK version.
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -22,8 +23,16 @@ try:  # optional dependency
 except Exception:  # noqa: BLE001
     _Base = object
 
-KIND = {"agent": "agent", "function": "tool", "generation": "llm", "response": "llm", "handoff": "handoff",
-        "guardrail": "guardrail", "custom": "other", "mcp_tools": "tool"}
+KIND = {
+    "agent": "agent",
+    "function": "tool",
+    "generation": "llm",
+    "response": "llm",
+    "handoff": "handoff",
+    "guardrail": "guardrail",
+    "custom": "other",
+    "mcp_tools": "tool",
+}
 
 
 def _ns(ts) -> int:
@@ -76,9 +85,14 @@ class EvalopsAgentsProcessor(_Base):
             return
         data = span.span_data
         typ = getattr(data, "type", "custom")
-        s = Span(span_id=str(span.span_id), parent_id=getattr(span, "parent_id", None),
-                 name=getattr(data, "name", None) or typ, kind=KIND.get(typ, "other"),
-                 start_ns=_ns(getattr(span, "started_at", None)), end_ns=_ns(getattr(span, "ended_at", None)))
+        s = Span(
+            span_id=str(span.span_id),
+            parent_id=getattr(span, "parent_id", None),
+            name=getattr(data, "name", None) or typ,
+            kind=KIND.get(typ, "other"),
+            start_ns=_ns(getattr(span, "started_at", None)),
+            end_ns=_ns(getattr(span, "ended_at", None)),
+        )
         if typ == "agent":
             s.agent_name = data.name
         elif typ == "function":

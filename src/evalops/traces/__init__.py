@@ -9,6 +9,7 @@ Public API:
 OpenTelemetry-instrumented frameworks (ADK, Strands, Pydantic AI, CrewAI, LlamaIndex, AutoGen,
 Semantic Kernel, smolagents, DSPy, ...) are captured automatically when `traces.capture: true`.
 """
+
 from .capture import BudgetExceeded, check_budget, current, install_otel, row_capture  # noqa: F401
 from .langchain import langchain_callbacks  # noqa: F401
 from .model import AgentTrace, Span  # noqa: F401

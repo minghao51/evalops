@@ -4,11 +4,14 @@ Every capture path (OpenTelemetry GenAI conventions, OpenInference, OpenLLMetry,
 Pydantic AI, LangChain/LangGraph callbacks, OpenAI Agents SDK processors) maps into it, so the
 same trajectory scorer works for every framework, offline in CI and online on production traces.
 """
+
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from ..contract import redact
 
 KINDS = ("agent", "llm", "tool", "retrieval", "embedding", "chain", "guardrail", "handoff", "other")
 
@@ -30,7 +33,7 @@ class Span:
     output_tokens: int = 0
     error: str | None = None
     attributes: dict = field(default_factory=dict)  # small, filtered raw attributes (e.g. operation)
-    seq: int = 0                                    # capture order, tie-breaker for equal timestamps
+    seq: int = 0  # capture order, tie-breaker for equal timestamps
 
     @property
     def duration_s(self) -> float:
@@ -41,7 +44,7 @@ class Span:
 class AgentTrace:
     spans: list[Span]
     trace_id: str | None = None
-    source: str = "unknown"          # otel | langchain | openai_agents | mixed | stored
+    source: str = "unknown"  # otel | langchain | openai_agents | mixed | stored
 
     # ---------- structure ----------
     def ordered(self) -> list[Span]:
@@ -109,10 +112,16 @@ class AgentTrace:
         tools = self.tool_calls()
         tin, tout = self.tokens()
         return {
-            "steps": self.steps, "llm_calls": len(self.llm_calls()), "tool_calls": len(tools),
-            "tool_errors": sum(1 for s in tools if s.error), "agents": len(self.agent_route()),
-            "handoffs": len(self.handoffs()), "errors": len(self.errors()),
-            "latency_s": round(self.duration_s, 4), "input_tokens": tin, "output_tokens": tout,
+            "steps": self.steps,
+            "llm_calls": len(self.llm_calls()),
+            "tool_calls": len(tools),
+            "tool_errors": sum(1 for s in tools if s.error),
+            "agents": len(self.agent_route()),
+            "handoffs": len(self.handoffs()),
+            "errors": len(self.errors()),
+            "latency_s": round(self.duration_s, 4),
+            "input_tokens": tin,
+            "output_tokens": tout,
         }
 
     # ---------- serialization / display ----------
@@ -122,19 +131,24 @@ class AgentTrace:
                 return v
             text = v if isinstance(v, str) else json.dumps(v, default=str)
             return v if len(text) <= max_payload_chars else text[:max_payload_chars] + "…[truncated]"
+
         spans = []
         for s in self.spans:
             d = asdict(s)
             d["inputs"], d["outputs"] = clip(s.inputs), clip(s.outputs)
             spans.append(d)
-        return {"trace_id": self.trace_id, "source": self.source, "spans": spans}
+        document = {"trace_id": self.trace_id, "source": self.source, "spans": spans}
+        # Outbound boundary (CONTRACT §5.1): the persisted/emitted trace is a redacted *deep copy*.
+        # The in-memory trace -- what scorers, `render` and replay see -- is never modified.
+        return redact.redact_document(document)
 
     @classmethod
     def from_dict(cls, d: dict | None) -> AgentTrace | None:
         if not d:
             return None
-        return cls(spans=[Span(**s) for s in d.get("spans", [])], trace_id=d.get("trace_id"),
-                   source=d.get("source", "stored"))
+        return cls(
+            spans=[Span(**s) for s in d.get("spans", [])], trace_id=d.get("trace_id"), source=d.get("source", "stored")
+        )
 
     def render(self, max_chars: int = 200) -> str:
         """Compact indented tree, e.g. for an LLM trajectory judge or `evalops traces`."""

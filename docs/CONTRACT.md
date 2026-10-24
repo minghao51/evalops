@@ -346,6 +346,83 @@ Policy:
    fingerprint-invariance test. A format change without a migration/read test is a failed WP.
 7. Reserved keys (`_meta`, and any key starting with `_`) are never prompt/dataset/tool names.
 
+### 5.1 Redaction (WP1.1)
+
+Payload redaction is one hook ([`src/evalops/contract/redact.py`](../src/evalops/contract/redact.py))
+applied at exactly **three** outbound boundaries, always **after** the identity hashes of §4 are
+computed:
+
+| Boundary | What is redacted |
+|---|---|
+| `run._put_artifact` | every ledger artifact body (`evalops/cost_estimate.json`, both locks, `evalops/rows.jsonl`). `evalops/rows.jsonl` is line-delimited JSON and takes the JSONL path, so `evalops/manifest.json` hashes the *stored* (redacted) bytes. |
+| `AgentTrace.to_dict` | a redacted deep copy of the emitted document; the in-memory trace (scorers, `render`, replay) is unchanged. |
+| `Cassette.save` | a redacted deep copy of the entries written. `Cassette.entries` and `Cassette.fingerprint()` are unchanged by `save()`, and `_meta` gains `redacted: true` and `redaction_rules: <sha256[:12]>` **only** when a rule actually changed something. `FORMAT_VERSION` stays `1`: the keys are additive metadata. |
+
+Nothing else is a redaction boundary: `.evalops/out/last_eval.json` is written from run metadata (no
+row payloads), so it carries no redacted *row* field -- the only diagnostic it can carry is the
+already-redacted replay-miss label described next. Replay-miss diagnostics (a replay miss under
+`tools.on_miss: live` or the miss error) are **redacted at capture time** with the same rules, so
+`.evalops/out/last_eval.json`, `data.tool_replay_misses` and the miss error message carry the redacted
+label, never the raw tool arguments; this is not a fourth boundary, it happens before any sink. Only
+`patterns`/`hook` apply to that label -- `fields:`/`hash:` name dotted paths inside a document and
+cannot match a flat string. Redaction covers **run payloads** -- ledger
+artifact bodies, trace serialization, cassettes -- and not configuration provenance or ledger
+params (`behavior_config`, the `app_version` hash inputs, run names/tags stay unredacted); secrets
+must therefore not live in `evalops.yaml` or in a `behavior_config()` payload.
+
+A cassette saved with redaction is **lossy by design**: replay returns the redacted values, and a
+reloaded cassette's `fingerprint()` differs from the pre-save fingerprint exactly when redaction
+changed a semantic entry field. That is the consequence of §4 (identity hashes cover the semantic
+fields and never `_meta`, so a `_meta`-provided identity would be spoofable); a cassette whose
+identity must survive record/replay round-trips uses `mode: off` or hash-only rules.
+
+Config: `redact:` is a closed section (`_Strict`), so `redact.<key>` is exit 2. Keys: `mode`
+(`strict` | `off`), `fields`, `hash`, `patterns` (`{name, regex, replace?}`), `hook`
+(`module:attribute`, validated like every other `HookSpec`). An invalid `regex` is exit 2 naming the
+pattern.
+
+Invariants:
+
+1. **Order.** `fields` (dotted-path globs → `[REDACTED:<glob>]`), then `patterns` (regex substitution
+   on every string leaf, default replacement `[REDACTED:<name>]`), then `hash` (dotted-path globs →
+   `sha256:<first 12 hex of sha256(canonical(value))>`), then `hook` (`(path, value) -> Any | None`;
+   `None`, or an equal value, leaves the node unchanged). Path syntax: `inputs.password` (dict keys),
+   `*` one segment, `**` any depth (including zero), `[]` every list element
+   (`spans[].outputs.token`). A glob that matches nothing is legal. Redaction covers *values*, never
+   dictionary keys.
+2. **Idempotence.** `redact(redact(x)) == redact(x)` for `fields`, `patterns` and `hash` always: a
+   value already shaped like `[REDACTED:<rule>]` is never re-replaced and a value already shaped like
+   `sha256:<12 hex>` is never re-hashed. A `hook` must be idempotent itself and must return `None`
+   for a value it already produced.
+3. **No identity hash moves.** Redaction runs after `cfg_hash`/`app_version` and the cassette
+   fingerprint are computed, and the new `_meta` keys are metadata: a run with redaction enabled has
+   the same `app_version`, dataset fingerprint and cassette fingerprint as the same run with it off.
+4. **Modes.** `redact.mode` defaults to `off`, which is bug-compatible: every byte is what evalops
+   wrote before this section existed. `EVALOPS_REDACT=strict|off` overrides the configured mode; any
+   other value is exit 2 naming the legal values (§1).
+5. **`strict` is a real write-path refusal.** After redaction the produced payload is re-scanned
+   with the same rules, and anything that still matches aborts with **exit 5** *before* a byte is
+   persisted (no artifact, no manifest, no cassette). It is never a warning. Artifact bodies are
+   buffered until every one of the run's payloads -- `evalops/cost_estimate.json`, both locks and
+   `rows.jsonl` -- has been verified, so a refusal writes *no* artifact, not a prefix of them. The
+   manifest is derived metadata and is never redacted; its hashes cover the stored artifact bytes.
+6. **`evalops redact` is a dry run.** `--check` is accepted but optional and changes nothing:
+   `evalops redact` and `evalops redact --check` behave identically (report only, never write). It
+   reads the ledger artifacts of a run group (default:
+   the group in `.evalops/out/last_eval.json`; exit 2 when neither exists) and/or repeatable
+   `--file PATH` (`.jsonl` = cassette/rows, `.json` = document), renders a line-oriented unified diff
+   (human mode) or counts plus at most 50 changed paths per sink (`--json`, inside `data`: no new
+   top-level envelope key), and **never writes**. It exits **0 even when it finds differences**: the
+   §1 exit matrix is frozen and "found a secret" is not a gate outcome. Because it is a command added
+   after §2 was frozen, its envelope is pinned by an additive golden
+   (`tests/fixtures/envelope/redact.json`) and the §2 golden list for the pre-existing commands is
+   unchanged.
+7. **Serialization-normalized.** Every payload is normalized through the same
+   `json.dumps(..., default=str)` round-trip the sinks write with *before* it is walked: a tuple
+   becomes a list, a set/dataclass/custom object becomes `str(value)`. The tree that is scanned is
+   therefore bit-for-bit the tree that is serialized, so a secret carried by a non-JSON value is
+   redacted (and refused by `strict`) exactly like one in a dict/list.
+
 ## 6. Judge pinning
 
 D11 applies to every judge used in `plan`, `eval`, `calibrate`, and `gate`. The rules below are the

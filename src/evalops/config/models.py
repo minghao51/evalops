@@ -27,6 +27,7 @@ Both are models, so a bad key is a dotted-path error (``plugins.promps``,
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -223,6 +224,45 @@ class LimitsConfig(_Strict):
     max_dataset_rows: int | None = None
 
 
+class RedactPattern(_Strict):
+    """One `redact.patterns` rule: `regex` is substituted on every string leaf with `replace`.
+
+    The regex is compiled at validation time, so an invalid one is exit 2 naming the pattern
+    instead of a crash on the first payload.
+    """
+
+    name: str
+    regex: str
+    replace: str | None = None
+
+
+class RedactConfig(_Strict):
+    """`redact:` -- the payload redaction hook (CONTRACT §5.1).
+
+    `mode: off` (the default) writes every byte exactly as evalops did before redaction existed;
+    `strict` redacts and then re-scans, refusing to persist a payload that still matches a rule
+    (exit 5). `EVALOPS_REDACT` overrides `mode` at run time. The glob syntax, the rule order and the
+    idempotence contract live in `evalops.contract.redact`.
+    """
+
+    mode: Literal["strict", "off"] = "off"
+    fields: list[str] = Field(default_factory=list)
+    hash: list[str] = Field(default_factory=list)
+    patterns: list[RedactPattern] = Field(default_factory=list)
+    hook: HookSpec | None = None
+
+    @field_validator("patterns")
+    @classmethod
+    def _regexes_compile(cls, value: list[RedactPattern]) -> list[RedactPattern]:
+        """A bad regex is a config error naming the pattern (exit 2), not a first-payload crash."""
+        for pattern in value:
+            try:
+                re.compile(pattern.regex)
+            except re.error as exc:
+                raise ValueError(f"pattern '{pattern.name}': invalid regex: {exc}") from exc
+        return value
+
+
 class EvalopsConfig(_Strict):
     """The merged ``evalops.yaml``: top level ⊕ the selected ``environments.<env>`` block."""
 
@@ -241,6 +281,7 @@ class EvalopsConfig(_Strict):
     eval: EvalConfig = Field(default_factory=EvalConfig)
     gates: GatesConfig = Field(default_factory=GatesConfig)
     judges: dict[str, JudgeRule] = Field(default_factory=dict)
+    redact: RedactConfig = Field(default_factory=RedactConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
     guard: GuardConfig = Field(default_factory=GuardConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)

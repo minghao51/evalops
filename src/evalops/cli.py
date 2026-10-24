@@ -103,6 +103,15 @@ def build_parser() -> argparse.ArgumentParser:
     cfsub.add_parser("validate", help="validate evalops.yaml; exit 2 naming every bad key path")
     cfsub.add_parser("schema", help="print the generated JSON Schema of evalops.yaml")
     cfsub.add_parser("explain", help="resolved configuration with per-key provenance")
+
+    rd = sub.add_parser("redact", help="dry-run the redaction rules: reports only, never writes")
+    rd.add_argument(
+        "--check",
+        action="store_true",
+        help="optional no-op: the command always reports only and never writes (exits 0 with differences)",
+    )
+    rd.add_argument("--group", help="ledger artifacts of this run group (default: group from last_eval.json)")
+    rd.add_argument("--file", action="append", default=[], metavar="PATH", help="repeatable: .jsonl or .json")
     return p
 
 
@@ -115,6 +124,11 @@ def dispatch(args, cfg) -> dict:
 
     if args.cmd == "config":
         return config_mod.run_config_command(cfg, args.config_action)
+    if args.cmd == "redact":
+        from .contract import redact as redact_mod
+
+        # `--check` is optional and changes nothing: the command is always a read-only report.
+        return redact_mod.run_check(cfg, group=args.group, files=args.file, as_json=args.json)
     if args.cmd == "plugins":
         reg = Registry(cfg)
         roles = {}
@@ -205,6 +219,14 @@ def main(argv=None) -> int:
         cfg = config_mod.load(args.config)
     except Exception as e:  # noqa: BLE001 - a broken config must still produce a valid envelope
         return _finish(envelope.from_error(command, _early_env(argv, e), e), args.json)
+    # Every command is bound to the config it just loaded (CONTRACT §5.1): the sinks that take no
+    # `Config` (`AgentTrace.to_dict`, `Cassette.save`) must never inherit another config's rules.
+    from .contract import redact as redact_mod
+
+    try:
+        redact_mod.activate(cfg)
+    except Exception as e:  # noqa: BLE001 - binding failures are envelopes too (exit 2 / exit 5)
+        return _finish(_error_envelope(args, cfg, e), args.json)
     if args.json:
         # A hook that prints must not corrupt the document: file descriptor 1 is captured for the
         # whole dispatch (so `sys.__stdout__` and child processes are caught too) and the captured
@@ -255,14 +277,19 @@ def _captured_stdout(run: Callable[[], dict[str, Any]]) -> tuple[str, dict[str, 
         return captured.read().decode("utf-8", "replace"), result
 
 
+def _error_envelope(args, cfg, exc: Exception) -> dict[str, Any]:
+    """Map one dispatch/binding exception to an envelope (EvalOpsError keeps its code, else exit 5)."""
+    if isinstance(exc, EvalOpsError):
+        return envelope.from_error(args.cmd, cfg.env, exc)
+    return envelope.failure(args.cmd, cfg.env, envelope.EXIT_RUNTIME, f"{type(exc).__name__}: {exc}")
+
+
 def _dispatch_envelope(args, cfg) -> dict[str, Any]:
     """Run ``dispatch`` and always return an envelope: usage errors, crashes and gate failures."""
     try:
         return envelope.from_result(args.cmd, cfg.env, dispatch(args, cfg))
-    except EvalOpsError as e:
-        return envelope.from_error(args.cmd, cfg.env, e)
     except Exception as e:  # noqa: BLE001 - unexpected failures are exit 5, never a traceback on stdout
-        return envelope.failure(args.cmd, cfg.env, envelope.EXIT_RUNTIME, f"{type(e).__name__}: {e}")
+        return _error_envelope(args, cfg, e)
 
 
 def _forward_to_stderr(text: str) -> None:

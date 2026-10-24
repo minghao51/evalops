@@ -4,6 +4,7 @@ Prompt versions and dataset snapshots live under .evalops/store/ and are committ
 files, so git *is* the registry. Aliases live in .evalops/store/prompts/<name>/aliases.json;
 moving an alias is a commit (the release job pushes it).
 """
+
 import json
 
 from ..ports import DatasetStore, LoadedPrompt, Plugin, PromptStore
