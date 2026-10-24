@@ -80,6 +80,11 @@ Three agents, defined in `.pi/agents/` (project scope, symlinked at the session 
 | `evalops-worker` | `deepseek/deepseek-flash` | implements exactly one WP, tests green, **no commits** |
 | `evalops-reviewer` | `zai/glm-5.3-flash` @ high | adversarial review: runs commands, falsifies claims, PASS/BLOCK |
 
+Fallback, verified 2026-10-24: `opencode-go/deepseek-v4.1-flash` (`OPENCODE_API_KEY`) runs the
+worker/scout role when the official deepseek key is unavailable — same model, different gateway;
+both routes were dispatched through the real agent harness and produced equivalent smoke reports
+(one agent-level A/B dispatch per route).
+
 Per WP: **packet → worker → reviewer → orchestrator commits**. The packet states goal, allowed paths,
 forbidden actions, falsifiable done-when and the exact commands. Writers are serialized per module
 family; at most two parallel workers in disjoint trees.
