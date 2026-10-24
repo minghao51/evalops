@@ -122,7 +122,7 @@ and the review rounds. Never commit with a red suite. Docs commits are separate 
 | WP1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
 | 1.4 test debt (gate/cassette/calibrate/CLI paths, exit codes 0–7, mutation-proven) | done | `1237611` |
 | 1.5 trace model v2 (nested `schema_version`, unknown attrs, breaker parity, v1/v2 fixtures) | done | `8d0c6d9` (1 review round PASS + 1 narrow re-review) |
-| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `3fc9197` (1 BLOCK + 2 narrow PASS rounds) |
+| 2.1 pipeline in Python (declarative stage table, `--dry-run`, in-process steps, bash shim) | done | `135bf0e` (1 BLOCK + 2 narrow PASS rounds) |
 
 **G1 closed** (2026-10-24): 283 tests, standalone 283/283, Postgres contract 1 passed, `make schema`
 zero drift, goldens untouched; CI `40078618397`. The full checklist and evidence are in §6.
@@ -182,7 +182,7 @@ Every checklist item holds; evidence:
 - **Gates green:** `make check` 283, standalone 283/283, `make contract` 1 passed with `.[sql]` +
   docker, `make schema` zero drift, no golden change. CI `40078618397` (py3.10/3.11/3.12).
 
-### WP2.1 — `evalops pipeline <stage>` (DONE, `3fc9197`)
+### WP2.1 — `evalops pipeline <stage>` (DONE, `135bf0e`)
 
 The CI stage table is now declarative Python: `evalops pipeline pr|main|release|nightly
 [--dry-run]`, nested commands in-process, exact exit-code propagation (1–7), one envelope on
