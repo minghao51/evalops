@@ -15,7 +15,7 @@ is not emitted at all, rather than compared against a missing value.
 import json
 from typing import Any
 
-from . import locks
+from . import judges, locks
 from .registry import Registry
 from .run import evaluate
 from .util import EXIT_USAGE, EvalOpsError
@@ -50,6 +50,9 @@ def _stats(pairs, threshold):
 
 
 def calibrate(cfg, dataset, scorers=None, allow_dirty=False) -> dict:
+    # Same load-time rejection as plan/evaluate (WP3b.1): a bad declared spec is exit 2 before the
+    # calibration evaluate() spends anything or writes a run row.
+    judges.load(cfg)
     rules = cfg.section("judges")
     names = scorers or list(rules)
     if not names:

@@ -9,7 +9,7 @@ import os
 import uuid
 from typing import Any, cast
 
-from . import cost, locks
+from . import cost, judges, locks
 from . import datasets as ds_mod
 from . import prompts as pr_mod
 from . import tools as tools_mod
@@ -52,6 +52,9 @@ def _tool_mode(cfg, stage, override):
 
 
 def plan(cfg, dataset, stage, repeats=None, judge_only=False) -> dict:
+    # Judge specs are load-rejected first (CONTRACT §6, WP3b.1): an invalid declared spec is exit 2
+    # with no cost estimate and no ledger write. No declared spec -> `{}` and nothing changes.
+    judges.load(cfg)
     reg = Registry(cfg)
     entry = locks.entries(locks.read(cfg, ds_mod.KIND)).get(dataset)
     if not entry:
@@ -180,6 +183,7 @@ def evaluate(
     The binding is scoped (`redact.use`), so a failure -- including a `strict` refusal -- restores
     whatever redactor was active before instead of leaving this config's rules behind.
     """
+    judges.load(cfg)  # exit 2 here, before any estimate/budget reservation/ledger row (WP3b.1)
     with redact.use(cfg):
         return _evaluate(
             cfg,

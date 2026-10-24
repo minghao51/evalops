@@ -18,7 +18,9 @@ and `default_env` (WP0.5c D2) and never raise on a recursive alias or a non-stri
 (WP0.5d D2), (m) the cost envelope's money fields keep their types so a masked
 amount cannot hide a type regression, (n) an ``--config`` value that happens to spell a sub-command
 name is consumed as a value, so `--config rollback ... --version` is still the top-level flag
-(WP0.5d D3).
+(WP0.5d D3), (o) the new ``judges`` command (WP3b.1) has an *additive* golden of its own: one
+full judge spec and one threshold-only rule, so both list branches are pinned and no rubric prose
+is emitted.
 
 Every test is a zero-argument function: ``python tests/run_without_pytest.py`` runs this module too.
 Regenerate the goldens (review the diff!) with ``EVALOPS_UPDATE_GOLDENS=1 pytest -q -k goldens``.
@@ -184,6 +186,26 @@ def build_predict_fn(prompts):
     return predict
 """
 NOISY_CONFIG = CONFIG.replace("predict_fn: fake_app:build_predict_fn", "predict_fn: noisy_app:build_predict_fn")
+
+# WP3b.1: `evalops judges` gets its own additive golden (a *new* command after the envelope
+# freeze). The project declares one full spec and one threshold-only rule, so both list branches of
+# `payload()` appear (a spec identity and the `unpinned` worklist) and the rubric text is provably
+# absent: only its length and its 12-hex identity are emitted.
+JUDGES_RUBRIC = """Score 1.0 when every claim matches the retrieved context; 0.0 otherwise.
+Penalize invented citations at most harshly.
+"""
+JUDGES_CONFIG = (
+    CONFIG
+    + "judges:\n"
+    + "  correctness:\n"
+    + "    model: fake-judge-2024-11-20\n"
+    + "    rubric: |\n"
+    + "".join(f"      {line}\n" for line in JUDGES_RUBRIC.splitlines())
+    + '    prompt_version: "3"\n'
+    + "    scale: {kind: binary, min: 0.0, max: 1.0}\n"
+    + "    sampling: {temperature: 0.0, max_tokens: 256, seed: 7}\n"
+    + "  helpful: {min_agreement: 0.85, min_kappa: 0.6}\n"
+)
 
 # WP1.2: a ledger plugin that keeps the non-abstract port defaults (`migrate`/`verify` raise
 # CapabilityError), so `ledger verify` pins the exit-6 mapping without adding a new exit code.
@@ -436,6 +458,10 @@ _NUMERIC_KEYS = (
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _URL = re.compile(r"^[a-z][a-z0-9+.-]*://")
 _HEX = re.compile(r"^[0-9a-f]{8,64}$")
+#: Values that look like an id but *are* the contract: `evalops judges` publishes a rubric's
+#: identity, so masking its 12-hex digest would let any rubric pass the golden. Only these keys
+#: skip the hex-by-value mask; no pre-existing golden has one, so no other snapshot moves.
+_PINNED_KEYS = frozenset({"rubric_hash"})
 #: A 12+ hex run inside free text is a run id / group id (`traces` embeds one in its summary).
 _HEX_IN_TEXT = re.compile(r"\b[0-9a-f]{12,64}\b")
 _MONEY = re.compile(r"\$\d+(?:\.\d+)?")
@@ -473,6 +499,8 @@ def _normalize(value: Any, key: str = "", tokens: tuple[str, ...] = ()) -> Any:
         return value
     if isinstance(value, str):
         text = value
+        if key in _PINNED_KEYS:
+            return text
         for token in tokens:
             text = text.replace(token, "<id>")
         text = _HEX_IN_TEXT.sub("<id>", text)
@@ -546,6 +574,7 @@ GOLDEN_NAMES = (
     "sync_check_failure",
     "ledger_verify",
     "redact",
+    "judges",
 )
 
 
@@ -566,6 +595,7 @@ def _golden_project() -> pathlib.Path:
             "secrets.json": SECRETS_JSON,
             "ledger_config.yaml": LEDGER_CONFIG,
             "memory_ledger.py": MEMORY_LEDGER,
+            "judges_config.yaml": JUDGES_CONFIG,
         },
     )
 
@@ -606,6 +636,8 @@ def _golden_envelopes(root: pathlib.Path) -> dict[str, tuple[int, dict]]:
     run("ledger_verify", "--config", "ledger_config.yaml", "ledger", "verify")
     # WP1.1: read-only, so it cannot disturb any earlier golden; it is deliberately last.
     run("redact", "--config", "redact_config.yaml", "redact", "--check", "--file", "secrets.json")
+    # WP3b.1: the new `judges` command (additive golden); read-only, so it disturbs nothing else.
+    run("judges", "--config", "judges_config.yaml", "judges")
     return out
 
 

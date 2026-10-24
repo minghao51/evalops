@@ -269,9 +269,14 @@ def resolve_env(path: str | None = None) -> str:
 
 def load(path: str | None = None) -> Config:
     config_path = find_config(path)
+    text = config_path.read_text()
     try:
-        raw = yaml.safe_load(config_path.read_text())
-    except yaml.YAMLError as e:  # malformed YAML is a usage error (exit 2), never an exit-5 crash
+        raw = yaml.safe_load(text)
+    except (yaml.YAMLError, ValueError) as e:
+        # Malformed YAML is a usage error (exit 2), never an exit-5 crash. A plain ValueError is
+        # the parser refusing a scalar it cannot build -- CPython raises one for an integer literal
+        # with more than 4300 digits (``Exceeds the limit ... for integer string conversion``) --
+        # and it happens before any key exists, so it is about the file, not a judge setting.
         raise EvalOpsError(f"{config_path}: invalid YAML: {e}", EXIT_USAGE, {"path": str(config_path)}) from e
     document = _expand(raw or {})
     if not isinstance(document, dict):

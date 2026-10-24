@@ -31,7 +31,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, field_validator
 
 Stage = Literal["dev", "pr", "main", "nightly", "control"]
 ToolMode = Literal["live", "record", "replay"]
@@ -46,6 +46,18 @@ def _hook_spec(value: str) -> str:
 
 
 HookSpec = Annotated[str, AfterValidator(_hook_spec)]
+
+
+def _not_boolean(value: Any) -> Any:
+    """Reject a JSON boolean where a number is expected (a Python ``bool`` is an ``int``)."""
+    if isinstance(value, bool):
+        raise ValueError("Input should be a finite number, not a boolean")
+    return value
+
+
+#: A judge's numeric setting: a real, finite JSON number -- never a bool, ``inf`` or ``NaN``.
+#: ``Infinity``/``NaN`` are not valid JSON, so they must be exit 2 before any envelope is rendered.
+JudgeNumber = Annotated[float, BeforeValidator(_not_boolean), Field(allow_inf_nan=False)]
 
 
 class _Strict(BaseModel):
@@ -124,6 +136,32 @@ class GatesConfig(_Strict):
     reliability: ReliabilityRule | None = None
 
 
+class ScaleRule(_Strict):
+    """``judges.<name>.scale``: the score range a judge emits.
+
+    The *semantic* checks (``kind`` is one of ``binary|ordinal|continuous``, ``min < max``,
+    ``binary`` is exactly ``0..1``) live in ``evalops.judges.JudgeSpec.validate()``, which is also
+    what ``evalops judges`` and ``plan``/``eval``/``calibrate`` run: this model only pins the key set
+    and the scalar types, so an unknown nested key is a dotted-path exit 2 (CONTRACT §1.1).
+    """
+
+    min: JudgeNumber = 0.0
+    max: JudgeNumber = 1.0
+    kind: str = "binary"
+
+
+class SamplingRule(_Strict):
+    """``judges.<name>.sampling``: how the judge is called (reproducible defaults).
+
+    Ranges (``temperature`` in ``[0, 2]``, positive ``max_tokens``, integer ``seed``) are checked by
+    ``evalops.judges.JudgeSpec.validate()``; the key set and the types are checked here.
+    """
+
+    temperature: JudgeNumber = 0.0
+    max_tokens: int = 512
+    seed: int | None = None
+
+
 class JudgeRule(_Strict):
     """Calibration thresholds for one judge, plus the pin ``judges.<name>.model`` of CONTRACT §6.
 
@@ -131,14 +169,24 @@ class JudgeRule(_Strict):
     part of the calibration contract, so it must be a field here (see ``calibrate``'s docstring).
     Every threshold is *optional*: an omitted key and an explicit ``null`` both mean "no such gate",
     and ``calibrate`` emits no check for it instead of comparing a number to nothing.
+
+    A rule **declares a judge spec** iff it carries at least one of ``rubric`` / ``scale`` /
+    ``prompt_version`` / ``sampling`` (``evalops.judges.SPEC_KEYS``); those four keys make it
+    validated at load time and load-rejected when unpinned. A rule with only thresholds is the
+    pre-3b shape: it declares no spec and behaves exactly as before (global pin enforcement is
+    WP3b.5).
     """
 
     min_agreement: float | None = None
     min_kappa: float | None = None
     max_mae: float | None = None
     label: str | None = None
-    threshold: float | None = None
+    threshold: JudgeNumber | None = None
     model: str | None = None
+    rubric: str | None = None
+    scale: ScaleRule | None = None
+    prompt_version: str | None = None
+    sampling: SamplingRule | None = None
 
 
 class DatasetDecl(_Strict):

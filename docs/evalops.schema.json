@@ -426,7 +426,7 @@
     },
     "JudgeRule": {
       "additionalProperties": false,
-      "description": "Calibration thresholds for one judge, plus the pin ``judges.<name>.model`` of CONTRACT \u00a76.\n\n``max_mae`` is checked by ``calibrate`` (``mae <= max_mae``) for scalar/ordinal judges; it is\npart of the calibration contract, so it must be a field here (see ``calibrate``'s docstring).\nEvery threshold is *optional*: an omitted key and an explicit ``null`` both mean \"no such gate\",\nand ``calibrate`` emits no check for it instead of comparing a number to nothing.",
+      "description": "Calibration thresholds for one judge, plus the pin ``judges.<name>.model`` of CONTRACT \u00a76.\n\n``max_mae`` is checked by ``calibrate`` (``mae <= max_mae``) for scalar/ordinal judges; it is\npart of the calibration contract, so it must be a field here (see ``calibrate``'s docstring).\nEvery threshold is *optional*: an omitted key and an explicit ``null`` both mean \"no such gate\",\nand ``calibrate`` emits no check for it instead of comparing a number to nothing.\n\nA rule **declares a judge spec** iff it carries at least one of ``rubric`` / ``scale`` /\n``prompt_version`` / ``sampling`` (``evalops.judges.SPEC_KEYS``); those four keys make it\nvalidated at load time and load-rejected when unpinned. A rule with only thresholds is the\npre-3b shape: it declares no spec and behaves exactly as before (global pin enforcement is\nWP3b.5).",
       "properties": {
         "label": {
           "anyOf": [
@@ -487,6 +487,52 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Version"
+        },
+        "rubric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rubric"
+        },
+        "sampling": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SamplingRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScaleRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "threshold": {
           "anyOf": [
@@ -872,6 +918,59 @@
         }
       },
       "title": "RowLimits",
+      "type": "object"
+    },
+    "SamplingRule": {
+      "additionalProperties": false,
+      "description": "``judges.<name>.sampling``: how the judge is called (reproducible defaults).\n\nRanges (``temperature`` in ``[0, 2]``, positive ``max_tokens``, integer ``seed``) are checked by\n``evalops.judges.JudgeSpec.validate()``; the key set and the types are checked here.",
+      "properties": {
+        "max_tokens": {
+          "default": 512,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        }
+      },
+      "title": "SamplingRule",
+      "type": "object"
+    },
+    "ScaleRule": {
+      "additionalProperties": false,
+      "description": "``judges.<name>.scale``: the score range a judge emits.\n\nThe *semantic* checks (``kind`` is one of ``binary|ordinal|continuous``, ``min < max``,\n``binary`` is exactly ``0..1``) live in ``evalops.judges.JudgeSpec.validate()``, which is also\nwhat ``evalops judges`` and ``plan``/``eval``/``calibrate`` run: this model only pins the key set\nand the scalar types, so an unknown nested key is a dotted-path exit 2 (CONTRACT \u00a71.1).",
+      "properties": {
+        "kind": {
+          "default": "binary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "default": 1.0,
+          "title": "Max",
+          "type": "number"
+        },
+        "min": {
+          "default": 0.0,
+          "title": "Min",
+          "type": "number"
+        }
+      },
+      "title": "ScaleRule",
       "type": "object"
     },
     "TokenPrice": {

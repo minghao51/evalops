@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "code": 0,
+  "schema_version": 1,
+  "command": "judges",
+  "env": "local",
+  "data": {
+    "judges": [
+      {
+        "name": "correctness",
+        "model": "fake-judge-2024-11-20",
+        "prompt_version": "3",
+        "scale": {
+          "max": 1.0,
+          "min": 0.0,
+          "kind": "binary"
+        },
+        "sampling": {
+          "temperature": 0.0,
+          "max_tokens": 256,
+          "seed": 7
+        },
+        "rubric_chars": 118,
+        "rubric_hash": "8b83464e4637"
+      }
+    ],
+    "unpinned": [
+      "helpful"
+    ]
+  },
+  "errors": []
+}

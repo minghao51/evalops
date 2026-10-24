@@ -135,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("baseline", help="show the current production baseline (git sha, group)")
     sub.add_parser("cost", help="month-to-date eval spend vs budget")
+    sub.add_parser("judges", help="declared judge specs (pinned model, rubric identity) and the unpinned worklist")
 
     cf = sub.add_parser("config", help="validate, print the JSON Schema of, or explain evalops.yaml")
     cfsub = cf.add_subparsers(dest="config_action", required=True)
@@ -270,6 +271,14 @@ def dispatch(args, cfg) -> dict:
         spent = float(cost.month_spend(Registry(cfg).get("ledger")))
         cap = cfg.section("cost").get("budgets", {}).get("per_month_usd")
         return {"summary": f"month to date ${spent} of ${cap}", "month_spent_usd": spent, "per_month_usd": cap}
+    if args.cmd == "judges":
+        from . import judges as judges_mod
+
+        # A declared but invalid spec is exit 2 here too (same load-time rejection as plan/eval).
+        data = judges_mod.payload(cfg)
+        if not args.json:  # human output is free-form (CONTRACT §2)
+            judges_mod.write_human(data)
+        return data
     raise EvalOpsError(f"unknown command {args.cmd}")
 
 
