@@ -94,6 +94,15 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    `_error_envelope`'s code normalization has a unit pin.
 13. **`ci_log.jsonl` is now one JSON envelope per line.** The bash pipeline teed multi-line rendered
    envelopes; line-oriented consumers still work, but the byte shape differs.
+14. **Calibration enforcement is stage-level (WP2.5).** A missing `datasets/judge_calibration.jsonl`
+   keeps the step a skip (pinned decision, not a failure); the `gate` command does not consume
+   calibration yet (WP3b.5). The enriched stage message is keyed on the `data.judges` payload shape,
+   so a future command emitting `judges` + failing `checks` would inherit the clause.
+15. **Fork PRs now run the `pr` stage (WP2.4).** The GitHub same-repo guard was deliberately removed;
+   the state goes to the WP2.2 bot branch and the adapter documents the write-token prerequisite,
+   but fork code executes with the workflow's permissions (`id-token: write` included) —
+   **maintainer confirmation pending** (HANDOFF §8).
+16. **`evalops ci-adapters` has no envelope golden** while `capabilities` does (HANDOFF §8).
 
 ## How to work in this repo
 
