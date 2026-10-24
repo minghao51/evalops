@@ -4,11 +4,11 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** **phase 2 WPs complete** — WP2.1 (`evalops pipeline`), WP2.2 (release re-verification,
-  released-group binding, fork-PR bot branch, nightly loud failure), WP2.3 (presets + init +
-  capability matrix), WP2.4 (four CI adapters generated from one template) and WP2.5 (calibration
-  enforcement, actionable stage error) done; what remains is the **G2 gate** (tag v0.4.0). Phase 1
-  is closed (G1).
+- **Phase:** **phase 2 closed at G2** (tagged `v0.4.0`) — WP2.1 (`evalops pipeline`), WP2.2
+  (release re-verification, released-group binding, fork-PR bot branch, nightly loud failure),
+  WP2.3 (presets + init + capability matrix), WP2.4 (four CI adapters generated from one template)
+  and WP2.5 (calibration enforcement, actionable stage error) done. Phase 1 is closed (G1); the
+  next phase is **3b** (judges, native-first, from WP3b.1 `JudgeSpec`).
 - **Verified base:** `4e00b29` (WP2.5) — **tests:** 359 green (`make check`), standalone 359/359.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
   `main` (last completed runs: `40100892525` WP2.4 feature, `40102918591` WP2.5 feature).
@@ -17,11 +17,17 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
   compatibility; `make check` 283, standalone 283/283, `make schema` zero drift, goldens untouched;
   Postgres contract 1 passed (`.[sql,dev]`, docker). CI run `40078618397`.
-- **Next:** the **G2 gate** — run the map's phase-2 checklist (pipeline parity, 7 presets +
-  zero-drift capability matrix, calibration enforced, all offline gates + CI matrix green), record
-  the evidence, tag **v0.4.0** (D10), then point the next thread at phase 3b (judges, native-first).
-  G2 needs no code change. Packet shape for any follow-up fix: `docs/packets/WP2.5.md` (newest).
-  Contract suite: `make contract` with `evalops[sql]` installed.
+- **G2 evidence (closed 2026-10-24, at 359 tests, tagged `v0.4.0`):** the four stage tables match
+  the bash stages and `--dry-run` lists them (fresh project, exit 0); `init --preset` exits 0 for
+  all seven presets and `make capabilities` leaves zero drift; a below-threshold calibration fails
+  real `pr`/`main` at the `calibrate` step with the failing judge/metric/limit/measured named
+  (`tests/unit/test_calibration_enforcement.py`, four mutations red); `make check` 359, standalone
+  359/359, `make contract` 1 skipped offline, `make schema` / `make ci-adapters` zero drift, goldens
+  untouched. CI `40102918591` (WP2.5) + `40103336121` (docs) green on py3.10/3.11/3.12.
+- **Next:** phase **3b** (judges, native-first) — WP3b.1 `JudgeSpec` with the pin required (unpinned
+  judge = exit 2) and `judge_meta()` unable to override it, then the native adapters (D6 order:
+  3b before 3). Packet shape for a new WP: `docs/packets/WP2.5.md` (newest). Contract suite:
+  `make contract` with `evalops[sql]` installed.
 
 ## Work packages
 

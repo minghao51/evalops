@@ -218,20 +218,25 @@ Repo: https://github.com/minghao51/evalops (public). CI: GitHub Actions matrix 3
 | 2.2 release re-verification | done | `86f75fa` — fresh guard+gate+baseline re-check before promote, released-group binding (exit 4 on re-release), fork-PR bot branch `evalops/state/pr-<N>`, nightly fails loudly without a baseline |
 | 2.4 CI adapters | done | `26d292c` — one template → GH/GitLab/Azure/Jenkins (Jenkins new), drift + no-logic tests, shim untouched |
 | 2.5 calibration enforcement | done | `4e00b29` — real `pr`/`main` stop at a below-threshold `calibrate`; failing judge/metric/limit/measured named in the stage error |
-| **G2** | **open — the only remaining phase-2 item** | tag `v0.4.0` (D10) |
+| **G2** | **closed** 2026-10-24, tagged `v0.4.0` (D10) | pipeline parity + 7 presets + calibration enforced; evidence in [`HANDOFF.md`](../HANDOFF.md) §6 |
 
 **G0 closed.** CI run `40047473262` on `main`: py3.10 / 3.11 / 3.12 all green.
 **G1 closed** (2026-10-24, at 283 tests): the full checklist and evidence are in
 [`HANDOFF.md`](../HANDOFF.md) §6; CI `40078618397`.
 
-**Next:** the **G2** gate — no work package left in phase 2. Run the checklist (pipeline parity;
-7 presets with a zero-drift capability matrix; calibration enforced; `make check`, standalone
-runner, `make contract` skip, `make schema` / `make ci-adapters` zero drift; CI matrix green),
-record the evidence, then tag **v0.4.0** (D10). Live status:
+**G2 closed** (2026-10-24, tagged `v0.4.0` at 359 tests): pipeline parity (the four stage tables
+match the bash stages and `--dry-run` lists them), seven presets (`init --preset` ×7, zero-drift
+capability matrix), calibration enforced (a below-threshold calibration fails real `pr`/`main` and
+the stage error names the failing check). Evidence: [`HANDOFF.md`](../HANDOFF.md) §6.
+
+**Next:** phase **3b** (judges, native-first; D6) — WP3b.1 `JudgeSpec` with the pin required
+(unpinned = exit 2) and `judge_meta()` unable to override it, then native adapters per preset,
+LiteLLM fallback, pairwise/panel, and calibration as a gate input. **G3b** tags `v0.5.0`. Phase 3
+(vendor contract verification) comes after 3b and needs docker + credentials. Live status:
 [`docs/STATE.md`](STATE.md) · entry point + coordination rules: [`HANDOFF.md`](../HANDOFF.md) §0/§4.
 
-**Next increment:** none — the next artifact is the G2 checklist evidence and the `v0.4.0` tag.
-Phase 3b (judges, native-first) starts from WP3b.1 `JudgeSpec` (pin required, unpinned = exit 2).
+**Next increment:** phase 3b — write `docs/packets/WP3b.1.md` (from the phase-3b row above) and
+dispatch it to `evalops-worker` after `HANDOFF.md` §4's coordination fetch check.
 
 ### Phase 0 delivered
 

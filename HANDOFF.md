@@ -1,10 +1,10 @@
-# HANDOFF: evalops — phase 2 WPs complete (2.1–2.5); G2 checklist + tag v0.4.0 next
+# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b (judges, native-first) is next
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
 (tests: **359 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; phase 1 is closed (G1) and **every phase-2 work package
-is done** — what remains is the **G2 gate** (checklist, then tag `v0.4.0`). The completed
+`docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and the next
+work is **phase 3b** (judges, native-first), starting at WP3b.1 `JudgeSpec`. The completed
 `docs/packets/WP2.5.md` / `WP2.4.md` are the newest packet templates.
 
 ## 0. Current snapshot (start here)
@@ -14,10 +14,10 @@ is done** — what remains is the **G2 gate** (checklist, then tag `v0.4.0`). Th
 | Verified base | `4e00b29` (WP2.5) — CI runs `40100892525` (WP2.4) and `40102918591` (WP2.5) green on py3.10 / 3.11 / 3.12; this docs commit sits on top |
 | Tests | 359 offline (`make check`), standalone 359/359, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
-| Phase 2 | **all WPs done** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
+| Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29`; checklist evidence in §6 |
 | Tree | clean; no uncommitted work |
-| Next artifact | the **G2 checklist** (phase-2 gates in `IMPLEMENTATION_MAP.md` §2 + D10), then tag **v0.4.0** |
-| Gate ahead | **G2**: pipeline parity, 7 presets, calibration enforced; tag **v0.4.0** |
+| Next artifact | `docs/packets/WP3b.1.md` (copy `docs/packets/WP2.5.md`, the newest template) |
+| Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; needs LiteLLM optional dep + fake SDK fixtures (offline) |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
 before every commit. The exact opening message is at the end of §10.
@@ -209,7 +209,7 @@ Read them before promising anything. The ones that bite:
   `data.steps` but that branch is untested (needs mocking `_git`);
 - `ci_log.jsonl` is now one JSON envelope per line (bash teed multi-line rendered envelopes).
 
-## 6. Phase status — phase 1 closed (G1); phase 2 WPs complete, G2 open
+## 6. Phase status — phases 1 and 2 closed (G1, G2 at `v0.4.0`); phase 3b next
 
 ### WP1.4 — test debt (DONE, `1237611`)
 
@@ -350,19 +350,39 @@ Residual: the `data.judges` discriminator is a negative-space property ("no othe
 input; that CONTRACT line now distinguishes the two enforcement points (the pipeline stage enforces
 today; the gate-input half is WP3b.5), and README's CI paragraph names Jenkins + `make ci-adapters`.
 
-### Next: the **G2** gate
+### G2 gate (phase 2 exit — CLOSED 2026-10-24, tagged `v0.4.0`)
 
-All phase-2 WPs are done; run the map's G2 checklist and tag **v0.4.0** (D10): pipeline parity
-(`pr`/`main`/`release`/`nightly` reproduce the bash stages; `--dry-run` lists them), 7 presets
-(`init --preset` + capability matrix zero drift), calibration enforced (WP2.5 pins), plus
-`make check` / standalone / `make contract` / `make schema` / `make ci-adapters` zero drift and
-the CI matrix green. The tag is the only artifact G2 produces; no code change should be needed.
+Every checklist item holds; evidence:
+- **Pipeline parity:** the four stage tables are the four bash stages, step for step, and
+  `pipeline <stage> --dry-run` lists them and writes nothing (fresh fixture project, all exit 0):
+  `pr` = `guard, sync, commit_state, calibrate, plan, eval, gate`;
+  `main` = `guard, sync, calibrate, plan, eval, gate, promote, commit_state`;
+  `release` = `guard, gate, baseline, promote, commit_state`;
+  `nightly` = `baseline, checkout, eval, gate, restore`. Real runs are pinned by WP2.1/2.2/2.5
+  (`tests/unit/test_pipeline.py`, `test_release_reverify.py`, `test_calibration_enforcement.py`).
+- **Seven presets:** `evalops init --preset <p>` exits 0 for `local, mlflow, databricks, langfuse,
+  langsmith, logfire, mixed`; `evalops capabilities` is deterministic and
+  `make capabilities` leaves zero drift (`tests/unit/test_presets.py` re-renders all seven).
+- **Calibration enforced:** a real below-threshold calibration fails `pr` and `main` at the
+  `calibrate` step (exit 1, no eval row, nothing promoted) and the stage error names the judge,
+  metric, required limit and measured value; absence stays a skip. Six pins in
+  `tests/unit/test_calibration_enforcement.py`, four mutations proven red.
+- **Gates green:** `make check` **359**, standalone **359/359**, `make contract` 1 skipped (docker
+  present; the contract test self-skips offline), `make schema` / `make capabilities` /
+  `make ci-adapters` zero drift, goldens untouched. CI `40102918591` (WP2.5) and `40103336121`
+  (docs) green on py3.10/3.11/3.12.
+- **Tag:** `v0.4.0` on the checklist commit (D10). No code change was needed.
+
+**Next:** phase **3b** (judges, native-first) — WP3b.1 `JudgeSpec` with the pin required
+(unpinned judge = exit 2) and `judge_meta()` unable to override it, then the native adapters.
+`docs/CONTRACT.md` §6 already states the target contract; phase 3 (vendor contract verification)
+needs services/credentials and stays after 3b (D6).
 
 ## 7. Remaining roadmap (phases 2 → 6)
 
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
-| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
+| **2** CLI/pipeline as code + presets — **closed at G2, tagged `v0.4.0`** | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
 | **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned = exit 2); 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement, resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
@@ -438,27 +458,31 @@ sed -n '/### Phase 2/,/### Phase 3b/p' docs/IMPLEMENTATION_MAP.md
 Then:
 
 1. **Check §4's coordination rules first.** `git fetch` + `git log --oneline main..origin/main`:
-   if the other session has already run the G2 checklist or tagged `v0.4.0`, cross-check it against
-   the map's G2 row before doing anything else (and do not re-tag).
-2. **Run the G2 checklist** and record the evidence (the map's phase-2 gate: pipeline parity —
-   `pr`/`main`/`release`/`nightly` reproduce the bash stages and `--dry-run` lists them; 7 presets
-   with a zero-drift capability matrix; calibration enforced per `4e00b29`; `make check`,
-   standalone runner, `make contract` skip, `make schema` and `make ci-adapters` zero drift; CI
-   matrix green). A small `docs/packets/G2.md` (or a HANDOFF §6 subsection) is enough — G2 produces
-   **no code change**; if the checklist finds a defect, fix it as its own small WP with review.
-3. **Tag `v0.4.0`** (D10) on the checklist commit, push the tag, and confirm the tag's CI run.
-   Then update STATE/HANDOFF to "phase 2 closed at G2" and point the next thread at phase 3b
-   (judges, native-first — starts with `JudgeSpec` + pin enforcement).
+   if the other session has already started phase 3b, cross-check its packet/commit against the
+   map's phase-3b row before doing anything else (disjoint trees or take the next WP).
+2. **Write the WP3b.1 packet** (`docs/packets/WP3b.1.md`, copying `docs/packets/WP2.5.md`'s shape)
+   from the map's phase-3b row: `JudgeSpec` with `judges.<name>.model` as the pin, unpinned →
+   exit 2 (never a warning), `judge_meta()` may only add — not override — the pin, and the resolved
+   model recorded per verdict. Read `docs/CONTRACT.md` §6 / D11, `src/evalops/scoring.py` and the
+   current `judge_meta` hook before writing it. Dispatch `evalops-worker`
+   (`deepseek/deepseek-flash`, cwd = the repo), then review with `evalops-reviewer`
+   (`zai/glm-5.3-flash`, thinking `high`).
+3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), fetch/rebase,
+   push, and confirm CI. Then WP3b.2 (native adapters per preset) → WP3b.3 (LiteLLM fallback) →
+   WP3b.4 (pairwise/panel) → WP3b.5 (pin enforcement + calibration as a gate input) → **G3b**
+   (tag `v0.5.0`). Phase 3 (vendor contract verification) comes after 3b and needs docker +
+   credentials — ask the maintainer before starting it.
 
 Suggested opening message for the new thread:
 
-> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. Every phase-2 work package is done
-> (WP2.1–2.5, 359 tests, CI green); what remains is the **G2 gate**: run the map's G2 checklist,
-> record the evidence, tag `v0.4.0`, and point the next thread at phase 3b. A second agent session
-> may be working this repo — follow HANDOFF §4's coordination rules
-> (fetch before dispatch, fetch/rebase before every commit, never reimplement a WP that already
-> landed, stay in disjoint trees). Start WP2.4 (CI adapters: all four of GH/GitLab/Azure/Jenkins
-> rendered from one template, calling `evalops pipeline`, no logic in YAML): write the packet in
-> the shape of `docs/packets/WP2.2.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash),
-> review with `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and
-> check CI. If origin/main already has WP2.4, do WP2.5 (calibration enforcement) instead.
+> Read `HANDOFF.md`, `docs/CONTRACT.md` and `docs/STATE.md`. Phases 1 and 2 are closed (G1; G2 at
+> tag `v0.4.0`), the suite is 359 tests and CI is green. Start **phase 3b** (judges, native-first)
+> at WP3b.1: `JudgeSpec` where `judges.<name>.model` is the pin, an unpinned judge is exit 2 (never
+> a warning), `judge_meta()` may only add to the pin, and the resolved model is recorded per
+> verdict. A second agent session may be working this repo — follow HANDOFF §4's coordination
+> rules (fetch before dispatch, fetch/rebase before every commit, never reimplement a WP that
+> already landed, stay in disjoint trees). Write the packet in the shape of
+> `docs/packets/WP2.5.md`, dispatch it to `evalops-worker` (deepseek/deepseek-flash), review with
+> `evalops-reviewer` (zai/glm-5.3-flash, high), commit only after PASS, then push and check CI. If
+> origin/main already has WP3b.1, take the next phase-3b WP instead. Phase 3 (vendor contract
+> verification) needs docker + credentials — ask the maintainer before starting it.
