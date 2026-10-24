@@ -17,7 +17,7 @@ reproducibility (cassettes).
 - **Backends:** MLflow / Databricks, Langfuse, LangSmith, Logfire, plain git + SQL, or your plugin.
 - **Interface:** one CLI for humans, CI and coding agents — stable exit codes `0–7`, frozen JSON envelope.
 - **History:** v0.3.0 imported as the baseline (`0a538e2`, 17 tests). Phase 0 added the contract,
-  typed config, versioned formats, envelope and dev tooling. **Now 179 tests, all offline.**
+  typed config, versioned formats, envelope and dev tooling. **Now 193 tests, all offline** (+1 Postgres contract test).
 
 ## 2. Non-negotiables (read before editing anything)
 
@@ -44,7 +44,7 @@ or `uv`:
 
 ```bash
 cd evalops
-.venv/bin/python -m pytest -q          # 179 tests
+.venv/bin/python -m pytest -q          # 193 tests + 1 contract (deselected)
 .venv/bin/python tests/run_without_pytest.py   # dependency-free runner
 make check                             # ruff + mypy + pytest (what CI runs)
 make schema                            # regenerate docs/evalops.schema.json
@@ -68,7 +68,8 @@ serialized per module family; at most two parallel workers in disjoint trees.
 
 Observed in phase 0: 12 BLOCK rounds / 35 defects. WP1.1: 4 rounds (2 BLOCK, then 2 PASS after an
 orchestrator-found replay-miss leak), 6 defects. WP1.3: 1 round (PASS, one dead-code cleanup).
-Phases 1–2 WPs will take 2–3 rounds each.
+WP1.2: 2 rounds (BLOCK on a live Postgres READ COMMITTED race + missing lifecycle docs, then PASS
+after a single-statement upsert and dialect dispatch). Phases 1–2 WPs will take 2–3 rounds each.
 Budget for it; do not skip review to "save time" — every round found something real, including a
 functional regression (`rollback --version 1` being parsed as the top-level version flag).
 
@@ -88,6 +89,7 @@ and the review rounds. Never commit with a red suite.
 | 0.6 state/changelog/**first CI run** | done | run `40047473262`: 3.10/3.11/3.12 all green |
 | 1.1 redaction (3 boundaries, strict, `redact --check`, demo of `src/` formatting) | done | `73c5dc7` |
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` |
+| 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` |
 
 One compromise carried forward:
 - Vendor plugins are still **unverified** (`VERIFY` markers) and logfire reads a private SQL table.
@@ -100,8 +102,9 @@ New, documented consequence of WP1.1: a redacted cassette is lossy on reload (CO
 ## 6. Phase 1 — what is next
 
 Full detail in `docs/IMPLEMENTATION_MAP.md` §2. **WP1.1 (redaction) and WP1.3 (statistics) are
-done** (`73c5dc7`, `eb30dd0`; CONTRACT §5.1, §9). Start with **WP1.2** (ledger integrity), then
-1.4, 1.5.
+done**, as is **WP1.2 (ledger integrity)** (`73c5dc7`, `eb30dd0`, `2a3ac40`; CONTRACT §3.3.1, §5.1,
+§9). Start with **WP1.4** (test debt), then WP1.5 (trace model v2). `make contract` runs the
+Postgres suite when `evalops[sql]` is installed and docker is available; it skips otherwise.
 
 ### WP1.1 — redaction (DONE, `73c5dc7`)
 
@@ -124,12 +127,15 @@ rows.jsonl and used for gate alignment (v0 falls back to `row_id`); baseline pin
 (delta, pct, Cohen's d, z, two-sided p, paired-by-row bootstrap CI); change attribution in
 `gate_report.md` + `data.attribution`. 28 tests in `tests/unit/test_gate_stats.py`.
 
-### WP1.2 — ledger integrity (NEXT)
+### WP1.2 — ledger integrity (DONE, `2a3ac40`)
 
-- Postgres via docker, `evalops ledger migrate|verify`, atomic budget reserve/settle, UTC month
-  boundary, N+1 fix in `find_runs`.
+Ledger schema v1 with transactional `migrate()` and read-only `verify()` (orphans, artifact hashes,
+budget totals, future version); atomic budget reserve/settle/release (one re-applying upsert per
+dialect; advisory defaults for non-SQL ledgers) wired into `run.evaluate`; explicit UTC month
+boundary; chunked `find_runs` (21 → 2 statements). Postgres contract test in `tests/contract/`
+(docker compose, skipped without the `sql` extra); MySQL reservation is text-verified only.
 
-### WP1.4 / 1.5
+### WP1.4 / 1.5 (NEXT)
 
 - 1.4 test debt: unit tests for `gate.reliability/ci_lower/check_rows`, cassettes, `calibrate._stats`,
   `evalops traces`, `promote --candidate/staging`, `rollback`, plan budget failure.

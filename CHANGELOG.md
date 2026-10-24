@@ -91,6 +91,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 - Change attribution: differing `app_version`/`config_hash`/`git_sha`/dataset/tool/prompt/judge/
   plugin params are named in `gate_report.md` and `data.attribution`; `behavior_config` excluded.
 
+### Added (WP1.2 — ledger integrity)
+
+- Ledger schema v1 (separate from `FORMAT_VERSION`): additive `evalops_meta`,
+  `evalops_budget` and `evalops_budget_month` tables; `migrate()` is transactional, idempotent and
+  row-preserving, and refuses a future schema version with exit 7.
+- `evalops ledger migrate|verify`: `verify` is read-only and detects orphan kv/artifact/budget rows,
+  manifest/hash mismatches of stored artifacts, budget total mismatches and an unknown schema
+  version. Integrity problems exit 5; a ledger plugin without the capability exits 6.
+- Atomic monthly budget: `budget_reserve/settle/release` on the ledger port (advisory defaults for
+  non-SQL ledgers), implemented as a single re-applying upsert inside one transaction. Concurrent
+  evals can no longer overspend the monthly cap; `run.evaluate` reserves `est/reps` per run, fails
+  exit 3 when the cap would be exceeded, releases on failure and settles the measured cost.
+- `cost.utc_month` / `cost._now_ms` make the month boundary explicit; `check_budget` projects spent
+  + outstanding reservations + estimate.
+- `find_runs` fetches kv rows in chunks instead of one query per run (2 statements for 20 runs).
+
+### Fixed (WP1.2)
+
+- Postgres READ COMMITTED could turn a concurrent first-reserve of a new month into a
+  `UniqueViolation` (exit 5); the upsert is now dialect-dispatched (`ON CONFLICT DO UPDATE` on
+  SQLite/Postgres, `ON DUPLICATE KEY UPDATE` on MySQL/MariaDB, exit 6 for unverified dialects).
+
 ## [0.3.0] - baseline
 
 The inherited v0.3 codebase: five plugin roles, seven environments, agent trace normalization,

@@ -4,10 +4,11 @@
 
 evalops is a backend-agnostic tool for versioning, evaluation, gating, and cost control of LLM apps **and agents**.
 
-> Status: phase 1 in progress — contract, typed config, versioned formats, frozen `--json` envelope,
-> payload redaction (WP1.1) and gate statistics (WP1.3: sample stdev, Wilson/bootstrap CIs, stable
-> row identity, pinned baseline, drift + change attribution) are done. Ledger integrity (WP1.2),
-> test debt and trace model v2 are next — see [`HANDOFF.md`](HANDOFF.md) and
+> Status: phase 1 nearly done — contract, typed config, versioned formats, frozen `--json` envelope,
+> payload redaction (WP1.1), gate statistics (WP1.3: sample stdev, Wilson/bootstrap CIs, stable row
+> identity, pinned baseline, drift + change attribution) and ledger integrity (WP1.2: schema
+> migrate/verify, atomic monthly budget, N+1-free `find_runs`) are done. Test debt (WP1.4) and trace
+> model v2 (WP1.5) are next — see [`HANDOFF.md`](HANDOFF.md) and
 > [`docs/IMPLEMENTATION_MAP.md`](docs/IMPLEMENTATION_MAP.md).
 
 - **Backends:** MLflow (local or Databricks), Langfuse, LangSmith, Logfire, plain git + SQL, or your own plugin.

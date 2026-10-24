@@ -4,12 +4,13 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** 1 in progress — WP1.1 (redaction) and WP1.3 (statistics) done; next WP1.2 ledger integrity.
-- **Tests:** 179 green (`make check`), 17 at baseline. **CI:** py3.10/3.11/3.12 green on `main`
-  (last completed run: `40054567708`, WP1.1).
+- **Phase:** 1 nearly done — WP1.1 (redaction), WP1.3 (statistics) and WP1.2 (ledger integrity) done;
+  next WP1.4 test debt, then WP1.5 trace model v2.
+- **Tests:** 193 green (`make check`), 17 at baseline (+1 Postgres contract test, excluded offline).
+  **CI:** py3.10/3.11/3.12 green on `main` (last completed run: `40058469207`, WP1.3).
 - **Repo:** https://github.com/minghao51/evalops (public).
-- **Next:** WP1.2 ledger integrity (Postgres via docker, `ledger migrate|verify`, atomic
-  budget reserve/settle, UTC month boundary, N+1 fix), then 1.4 test debt and 1.5 trace model v2.
+- **Next:** WP1.4 test debt (gate/cassette/calibrate/traces/promote/rollback/plan exit paths), then
+  WP1.5 trace model v2. Postgres contract suite: `make contract` with `evalops[sql]` installed.
 
 ## Work packages
 
@@ -24,6 +25,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 0.6 STATE/CHANGELOG + first real CI run | done | `022be67` + run `40047473262` |
 | 1.1 redaction (3 boundaries, strict, `redact --check`, src formatting) | done | `73c5dc7` (4 review rounds: 6 defects) |
 | 1.3 statistics (sample stdev, Wilson/bootstrap, pass^k, row_key, pinned baseline, drift, attribution) | done | `eb30dd0` (1 review round: PASS, 1 cleanup) |
+| 1.2 ledger integrity (schema migrate/verify, atomic budget, UTC month, N+1) | done | `2a3ac40` (2 review rounds: PG race, dialect dispatch) |
 
 ## Known compromises (tracked, not forgotten)
 
@@ -38,14 +40,23 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    `evalops.yaml` or a `behavior_config()` payload.
 4. **A backend write failure mid-artifact-loop can still leave a prefix.** The strict-refusal path
    is atomic (all payloads verified before the first write); a `Ledger.put_artifact` failure after
-   the loop starts is not rolled back. WP1.2 (ledger integrity) owns that.
-5. **pass^k is the plug-in estimator** over the *first k* repeats per case, not the combinatorial
+   the loop starts is not rolled back, and no manifest exists yet for `ledger verify` to flag.
+   Postgres contract tests cover the budget/ledger paths, not partial artifact publication.
+5. **Budget reservations are atomic only on the SQL ledger.** Non-SQL ledgers keep the advisory
+   defaults (CONTRACT §3.3.1). A run that crashes between reserve and settle leaves its reservation
+   counted against the month; `verify` cannot see it (the ledger is self-consistent) and there is no
+   release command yet — repair is manual SQL.
+6. **MySQL budget reservation is untested.** The statement is dialect-correct (`ON DUPLICATE KEY
+   UPDATE`) but no contract service exists; Postgres is the verified non-SQLite backend.
+7. **A fresh/legacy SQL ledger reports `schema_version: 0`** until `evalops ledger migrate` runs;
+   budget tables are created lazily and do not stamp the version. `verify` still checks what exists.
+8. **pass^k is the plug-in estimator** over the *first k* repeats per case, not the combinatorial
    "at least k of n"; k is the minimum repeat count and ragged input is flagged
    (`comparable: false`). Pinned by tests and CONTRACT §9. A `min_pass_hat_k_wilson` rule without
    `reliability.success` still emits no check (pre-existing pattern).
-6. **Row identity falls back to `row_id`** when any stored row lacks `row_key` (native/vendor
+9. **Row identity falls back to `row_id`** when any stored row lacks `row_key` (native/vendor
    evaluators that build `RowResult` themselves). Reported as `aligned_by: "row_id"`.
-7. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
+10. **Package name.** PyPI `evalops` / `evalops-sdk` and the GitHub org `evalops` belong to another
    product (Deixic, Inc.). Import name stays `evalops`; distribution name is decided in WP6.1
    (`evalplane` and `agentgates` are free). See ADR 0001.
 
