@@ -7,6 +7,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+### Added
+
+- **WP3b.1 `JudgeSpec` (2026-10-24):** a judge is now a core, vendor-free value object — rubric,
+  scale (binary/ordinal/continuous), pinned `model`, `prompt_version` and sampling — in frozen
+  dataclasses, validated at load. A `judges.<name>` rule declares a spec exactly when it carries
+  `rubric`/`scale`/`prompt_version`/`sampling`; threshold-only rules (the shipped `evalops.yaml`
+  shape) declare none and behave byte-identically, so gate-level pin enforcement stays WP3b.5. An
+  unpinned declared spec is exit 2 naming the dotted config path (absent/empty/`latest`/`*-latest`/
+  `auto`/`default` model; absent/empty/`latest` prompt_version; empty rubric), as are a bad scale,
+  sampling bounds and nested unknown keys. `plan`/`eval`/`calibrate` load the specs before any
+  estimate, budget reservation or ledger write. Numeric validation is two-layered, both exit 2: the
+  pydantic model rejects bool/±inf/NaN at the exact key (so `config validate` can never accept a
+  value that serialises as `Infinity`), and `JudgeSpec.validate()` rejects the same plus float
+  overflow for direct API use; a YAML integer above CPython's 4300-digit limit is now translated by
+  the config loader like every other malformed yaml (exit 2 naming the file, per CONTRACT §2,
+  never exit 5). `evalops judges --json` exposes the identity surface (`rubric_hash`, never the
+  rubric text) plus the `unpinned` worklist, pinned by an additive golden; the config schema gains
+  the four judge keys. 359 → 388 tests. Review: 2 BLOCK rounds (7 defects: `Infinity` in the
+  envelope, `OverflowError`, parser digit-limit exit 5, un-normalised int bounds, vague substring
+  test) + 1 orchestrator adjudication (which validation layer names the path is not a requirement;
+  the test now pins the exact per-layer path) + final PASS.
 - **WP2.5 calibration enforcement in the pipeline (2026-10-24):** a judge calibration below
   `judges.<name>.min_agreement` / `min_kappa` fails `evalops pipeline pr` (and `main`) at the
   `calibrate` step with exit 1 — no plan/eval/gate, no eval run row, nothing promoted — and the

@@ -1,22 +1,23 @@
-# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b (judges, native-first) is next
+# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b in progress (WP3b.1 done; 3b.2 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
 (tests: **359 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
 `docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and the next
-work is **phase 3b** (judges, native-first), starting at WP3b.1 `JudgeSpec`. The completed
-`docs/packets/WP2.5.md` / `WP2.4.md` are the newest packet templates.
+work is **phase 3b** (judges, native-first): WP3b.1 `JudgeSpec` landed, WP3b.2 (native adapters)
+is next. The completed `docs/packets/WP3b.1.md` / `WP2.5.md` are the newest packet templates.
 
 ## 0. Current snapshot (start here)
 
 | | |
 |---|---|
-| Verified base | `4e00b29` (WP2.5) — CI runs `40100892525` (WP2.4) and `40102918591` (WP2.5) green on py3.10 / 3.11 / 3.12; this docs commit sits on top |
-| Tests | 359 offline (`make check`), standalone 359/359, 1 Postgres contract test (excluded) |
+| Verified base | `173a416` (WP3b.1) — CI run `40109899232` green on py3.10 / 3.11 / 3.12; this docs commit sits on top |
+| Tests | 388 offline (`make check`), standalone 388/388, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
-| Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29`; checklist evidence in §6 |
+| Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
+| Phase 3b | **WP3b.1 done** (`173a416`: `JudgeSpec`, load-time pin validation, `evalops judges`); **WP3b.2 next** |
 | Tree | clean; no uncommitted work |
-| Next artifact | `docs/packets/WP3b.1.md` (copy `docs/packets/WP2.5.md`, the newest template) |
+| Next artifact | `docs/packets/WP3b.2.md` (copy `docs/packets/WP3b.1.md`, the newest template) |
 | Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; needs LiteLLM optional dep + fake SDK fixtures (offline) |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
@@ -37,9 +38,11 @@ reproducibility (cassettes). **Wrap and normalize, never rebuild.**
 - **History:** v0.3.0 imported as the baseline (`0a538e2`, 17 tests). Phase 0 added the contract,
   typed config, versioned formats, envelope and dev tooling. Phase 1 (closed, G1) added redaction
   (WP1.1), gate statistics + row identity (WP1.3), ledger integrity (WP1.2), test debt (WP1.4) and
-  trace model v2 (WP1.5). Phase 2 is underway: `evalops pipeline` (WP2.1) and presets + the
-  generated capability matrix (WP2.3) are in; release re-verification (2.2), CI adapters (2.4) and
-  calibration enforcement (2.5) remain before G2 tags v0.4.0.
+  trace model v2 (WP1.5). Phase 2 is closed at G2 (`v0.4.0`): `evalops pipeline` (WP2.1), release
+  re-verification (2.2), presets + capability matrix (2.3), the four generated CI adapters (2.4) and
+  calibration enforcement (2.5). Phase 3b (judges, native-first) has started: `JudgeSpec` (3b.1) is
+  in, the native adapters (3b.2), the LiteLLM fallback (3b.3), pairwise/panel (3b.4) and pin
+  enforcement (3b.5) remain before **G3b** tags `v0.5.0`.
 
 ## 2. Non-negotiables (read before editing anything)
 
@@ -389,39 +392,48 @@ Every checklist item holds; evidence:
 `docs/CONTRACT.md` §6 already states the target contract; phase 3 (vendor contract verification)
 needs services/credentials and stays after 3b (D6).
 
-### WP3b.1 — `JudgeSpec` in core, pin-validated at load (NEXT)
+### WP3b.1 — `JudgeSpec` in core, pin-validated at load (DONE, `173a416`)
 
-Write the packet from the map's phase-3b row (copy `docs/packets/WP2.5.md`'s shape — it is the
-newest template). Grounding, verified in the tree at `6572ca3`:
+`JudgeSpec` is a core, vendor-free value object (`src/evalops/judges.py`): rubric, scale
+(`binary`/`ordinal`/`continuous`), pinned `model`, `prompt_version` and sampling, in frozen
+dataclasses. A `judges.<name>` rule declares a spec **iff** it carries
+`rubric`/`scale`/`prompt_version`/`sampling`; threshold-only rules — the shipped `evalops.yaml`
+shape — declare none and behave byte-identically, so this WP deliberately does **not** pre-empt the
+3b.5 gate enforcement. An unpinned declared spec is exit 2 naming the dotted config path (model
+absent/empty/`latest`/`*-latest`/`auto`/`default`; prompt_version absent/empty/`latest`; empty
+rubric), as are bad scale/sampling values and nested unknown keys. `plan`/`evaluate`/`calibrate`
+load the specs before any estimate, budget reservation or ledger write, so an invalid spec costs
+nothing and writes no row. `evalops judges --json` exposes the identity surface (`rubric_hash`,
+never the rubric text) plus an `unpinned` worklist; the config schema gains the four judge keys and
+`docs/evalops.schema.json` (plus the schema-embedding `config_schema` golden) is regenerated.
 
-- **What exists.** `src/evalops/config/models.py` already has `JudgeRule` (calibration thresholds
-  plus `model: str | None` — the pin, currently unvalidated beyond being a string);
-  `src/evalops/scorers/judges.py` is the rubric judge; `run.py` (:60, :231) and `calibrate.py`
-  (:116) read `cfg.hook("judge_meta")()` into run metadata; `presets.py` (:209) points the hook at
-  `app.evalops_hooks:judge_meta`; `docs/CONTRACT.md` §6 (lines ~505–525) already states the target
-  contract, and D11 fixes the rule: `judges.<name>.model` is the pin, `judge_meta()` may only add.
-- **Scope of 3b.1 (and what is *not* in it).** A `JudgeSpec` dataclass/model in core — name,
-  rubric, scale, model pin, `prompt_version`, sampling — that validates at **load** with **no SDK
-  import** (core stays vendor-free; the judge adapters are 3b.2). An unpinned or alias/default pin
-  is rejected at load with **exit 2** (CONTRACT's exit table: "unpinned judge at load" is USAGE).
-  **Enforcement at the gate (exit 1) and the resolved-model-per-verdict recording are WP3b.5** —
-  3b.1 must not pre-empt them, and the packet must say so explicitly so the worker does not widen.
-- **The pin is authoritative:** `judge_meta()` may add rubric/version/sampling/cost metadata but a
-  `model` it returns must never override `judges.<name>.model` (a test must show the resolved value
-  is the config pin even when the hook lies).
-- **Falsifiable checks to pin in the packet:** an unpinned spec → exit 2 at load with a path-naming
-  message; a `judges.<name>.model: "default"`/alias/empty value → exit 2; a hook that returns a
-  different `model` does not change the resolved pin; an existing pinned `judges:` block keeps
-  loading unchanged; `config schema` regenerates with the new fields and zero drift otherwise;
-  no vendor import appears in the new core module (`test_no_vendor_imports`).
-- **Allowed paths** are likely `src/evalops/config/models.py`, a new core module (e.g.
-  `src/evalops/judges.py`), `src/evalops/scoring.py` if the spec is consumed there,
-  `tests/unit/test_judges.py` (new), and `docs/evalops.schema.json` regenerated via
-  `make schema`. `run.py`/`scorers/judges.py` only if the spec must be wired for the load-time
-  validation; name whatever you allow and forbid the rest.
-- **Ask before guessing:** if "scale" or "sampling" semantics are undefined for the existing
-  rubric judge, that is a decision for the maintainer (the repo's rule: undefined contract
-  semantics are blockers, not guesses).
+Numeric validation is deliberately two-layered, both exit 2: the pydantic `JudgeNumber` rejects
+bool/±inf/NaN at the exact key (so `config validate` can never accept a value that serialises as
+`Infinity`), and `JudgeSpec.validate()` rejects the same plus float overflow for direct API use;
+a YAML integer above CPython's 4300-digit limit is translated by the config loader like every other
+malformed yaml (exit 2 naming the file, CONTRACT §2). 29 new tests (359 → 388). Review: 2 BLOCK
+rounds — `Infinity` in the envelope plus an `OverflowError`, then the parser digit limit escaping
+as exit 5 and un-normalised int bounds — an orchestrator adjudication (which validation layer names
+the path is not a requirement; the test now pins the exact per-layer path), and a final PASS.
+
+**Still open and deliberately deferred to 3b.5:** a `model` returned by `judge_meta()` may still
+disagree with `judges.<name>.model` (CONTRACT §6 says that conflict is exit 2 at load and that every
+judge, including a `model`-only rule, is pin-validated); `unpinned` is not an exhaustive list.
+Recorded as STATE compromise 17.
+
+### WP3b.2 — native judge adapters per preset (NEXT)
+
+Write the packet from the map's phase-3b row (copy `docs/packets/WP3b.1.md`'s shape — the newest
+template). Grounding: `src/evalops/scorers/judges.py` holds the framework-neutral `span_judge` /
+`trajectory_judge` wrappers; a `JudgeSpec` now carries rubric/scale/pin/prompt_version/sampling;
+the seven presets are in `src/evalops/presets.py` and the capability matrix is generated by
+`make capabilities` (`evalops.presets.write_capabilities`). Deliver four adapters — MLflow
+`make_judge`, Langfuse managed evaluators (server-side + score read-back), openevals (LangSmith),
+pydantic-evals (Logfire/local) — each unit-tested **offline against fake SDK modules** (no vendor
+install: the doctor pins assert vendor presets stay unreachable in `.venv`), with
+`scorers/judges.py` becoming wrappers over them and the capability matrix listing which preset has
+native judges. Keep every adapter behind a lazy import that translates `ImportError` into a
+`CapabilityError` hint (CONTRACT §3.0/§7.4), and do not record resolved models per verdict (3b.5).
 
 After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) → 3b.4 (pairwise/panel) →
 3b.5 (pin enforcement + resolved model + calendar/settings check + calibration as gate input) →
@@ -432,7 +444,7 @@ After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) →
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
 | **2** CLI/pipeline as code + presets — **closed at G2, tagged `v0.4.0`** | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
-| **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned = exit 2); 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement, resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
+| **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done**; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
 | **5** real framework trace fixtures | 5.1 real span fixtures × pinned versions (LangGraph, OpenAI Agents, ADK, Pydantic AI, CrewAI, LlamaIndex, Strands, AutoGen, Semantic Kernel, smolagents, DSPy); 5.2 verified dialect table + `traces --unknown-attrs`; 5.3 breaker parity + runaway-loop tests; 5.4 cassette parity + consent-gated record | 11 frameworks verified, drift visible in CI | **G5**. Heavy: installing 11 frameworks with pinned versions; needs user consent for recorded traces. |
@@ -475,6 +487,8 @@ src/evalops/
                          commit_state, --dry-run, ci_log.jsonl/baseline.json outputs
   presets.py             the 7 D8 presets, yaml renderer (validated), init(), capability matrix
   calibrate.py           judge calibration vs human labels (agreement/kappa/MAE)
+  judges.py              JudgeSpec (rubric/scale/pin/prompt_version/sampling) validated at load;
+                         `evalops judges` identity surface + the `unpinned` worklist
   ci_adapters.py         the four CI adapters rendered from one per-stage spec (make ci-adapters)
   guard.py               static bypass guard
   scoring.py             neutral scorer protocol + normalization + aggregation
@@ -506,7 +520,7 @@ git fetch origin && git log --oneline main..origin/main     # is the other sessi
 gh run list --limit 1                                       # confirm CI green on main
 git tag -l v0.4.0                                          # phase 2 close marker
 sed -n '/### Phase 3b/,/### Phase 3 —/p' docs/IMPLEMENTATION_MAP.md
-sed -n '/### WP3b.1/,/^## 7/p' HANDOFF.md                  # the pickup brief
+sed -n '/### WP3b.2/,/^## 7/p' HANDOFF.md                  # the pickup brief
 ```
 
 Then:

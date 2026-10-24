@@ -525,6 +525,19 @@ rule is binding on new code but only enforced where a test exists.
 - Server-side judge settings (Langfuse project defaults, pydantic-evals defaults) are re-checked in
   the nightly job; drift fails nightly. A wrapper records the **resolved** model per verdict (R3).
   *(target: WP3b.5)*
+- **A declared judge spec is validated at load (WP3b.1).** A `judges.<name>` block that carries any
+  of `rubric`, `scale`, `prompt_version`, `sampling` declares a spec, and an unpinned or
+  alias/default value is **exit 2 at load**, naming the dotted key (`judges.<name>.model`):
+  `default`, `latest`, `*-latest`, `auto`, `default/*`, `*/*/default` and empty are not pins.
+  `scale.kind` is closed (`binary` | `ordinal` | `continuous`), `min < max`, `binary` is `0..1`, a
+  `threshold` lies inside the scale, and sampling bounds are `temperature` in `[0, 2]`,
+  `max_tokens > 0`, `seed` an int or null. Numeric validation runs in two layers, both exit 2 (the
+  config model at the exact key, `JudgeSpec.validate()` at the owning path), and neither layer may
+  emit `Infinity`/`NaN` in an envelope. `evalops judges --json` reports the identity surface per
+  spec (`rubric_hash`, never the rubric text) and the `unpinned` worklist. A block that declares no
+  spec (thresholds and/or `model` only) is unchanged by WP3b.1: **validating the pin for every
+  judge, and refusing a `judge_meta()` that disagrees with the config pin, remain WP3b.5.**
+  `unpinned` is therefore not an exhaustive list of unvalidated judges.
 
 ## 7. Third-party plugin requirements
 

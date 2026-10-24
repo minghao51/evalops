@@ -4,14 +4,13 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 ## Where we are
 
-- **Phase:** **phase 2 closed at G2** (tagged `v0.4.0`) — WP2.1 (`evalops pipeline`), WP2.2
-  (release re-verification, released-group binding, fork-PR bot branch, nightly loud failure),
-  WP2.3 (presets + init + capability matrix), WP2.4 (four CI adapters generated from one template)
-  and WP2.5 (calibration enforcement, actionable stage error) done. Phase 1 is closed (G1); the
-  next phase is **3b** (judges, native-first, from WP3b.1 `JudgeSpec`).
-- **Verified base:** `4e00b29` (WP2.5) — **tests:** 359 green (`make check`), standalone 359/359.
+- **Phase:** **phase 3b in progress** (judges, native-first) — WP3b.1 (`JudgeSpec`: a declared
+  judge spec is representable and an unpinned one cannot load) done. Phases 1 and 2 are closed
+  (**G1**, **G2** at `v0.4.0`); next is WP3b.2 (native adapters per preset), then 3b.3–3b.5 and
+  **G3b** (`v0.5.0`).
+- **Verified base:** `173a416` (WP3b.1) — **tests:** 388 green (`make check`), standalone 388/388.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
-  `main` (last completed runs: `40100892525` WP2.4 feature, `40102918591` WP2.5 feature).
+  `main` (last completed runs: `40109899232` WP3b.1 feature; phase-2 close at `40103336121`).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
@@ -24,10 +23,12 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   (`tests/unit/test_calibration_enforcement.py`, four mutations red); `make check` 359, standalone
   359/359, `make contract` 1 skipped offline, `make schema` / `make ci-adapters` zero drift, goldens
   untouched. CI `40102918591` (WP2.5) + `40103336121` (docs) green on py3.10/3.11/3.12.
-- **Next:** phase **3b** (judges, native-first) — WP3b.1 `JudgeSpec` with the pin required (unpinned
-  judge = exit 2) and `judge_meta()` unable to override it, then the native adapters (D6 order:
-  3b before 3). Packet shape for a new WP: `docs/packets/WP2.5.md` (newest). Contract suite:
-  `make contract` with `evalops[sql]` installed.
+- **Next:** WP3b.2 (native judge adapters: MLflow `make_judge`, Langfuse managed evaluators,
+  openevals for LangSmith, pydantic-evals for Logfire/local — `scorers/judges.py` becomes
+  wrappers), then 3b.3 (LiteLLM rubric fallback), 3b.4 (pairwise/panel), 3b.5 (gate enforcement,
+  resolved model per verdict, nightly settings check, calibration as gate input) and **G3b**.
+  Packet shape for a new WP: `docs/packets/WP3b.1.md` (newest). Contract suite: `make contract`
+  with `evalops[sql]` installed.
 
 ## Work packages
 
@@ -50,6 +51,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 2.2 release re-verification + released-group binding + fork-PR bot branch + nightly loud failure | done | `86f75fa` (1 review round: PASS, 0 defects) |
 | 2.4 CI adapters generated from one template (`ci_adapters.py`, `evalops ci-adapters`, `make ci-adapters`, `ci/Jenkinsfile`) | done | `26d292c` (1 BLOCK: 6 defects + narrow re-review PASS) |
 | 2.5 calibration enforcement (real `pr`/`main` pins, failing checks named in the stage error) | done | `4e00b29` (1 review round: PASS, 0 defects) |
+| 3b.1 `JudgeSpec` (rubric/scale/pin/prompt_version/sampling; unpinned declared spec = exit 2 at load; `evalops judges`) | done | `173a416` (2 BLOCK rounds: 7 defects + 1 adjudication + narrow PASS) |
 | **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
 
 ## Known compromises (tracked, not forgotten)
@@ -103,6 +105,12 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    but fork code executes with the workflow's permissions (`id-token: write` included) —
    **maintainer confirmation pending** (HANDOFF §8).
 16. **`evalops ci-adapters` has no envelope golden** while `capabilities` does (HANDOFF §8).
+17. **`JudgeSpec` validates only declared specs (WP3b.1).** A `judges.<name>` rule declares a spec
+   iff it carries `rubric`/`scale`/`prompt_version`/`sampling`. A rule with **only** `model` is
+   neither a spec nor on `evalops judges`'s `unpinned` list — today it is a no-op key, and WP3b.5
+   must validate the pin for **every** judge rather than treating `unpinned` as exhaustive. Numeric
+   validation is two-layered by design (config model at the exact key, `JudgeSpec.validate()` at
+   the owning path); both are exit 2 and neither can emit `Infinity`/`NaN` in an envelope.
 
 ## How to work in this repo
 
