@@ -7,6 +7,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP2.4 CI adapters generated from one template (2026-10-24):** GitHub Actions, GitLab CI,
+  Azure Pipelines and Jenkins now render from one template in core
+  (`src/evalops/ci_adapters.py`, a per-stage binding table over `pipeline.STAGES`) instead of
+  hand-written prose, and **Jenkins exists for the first time**. `evalops ci-adapters` reports the
+  four adapters (sorted, writes nothing) or `--write`s them; `make ci-adapters` mirrors
+  `make schema`/`make capabilities`. The rendered files only bind platform events to
+  `bash ci/pipeline.sh <stage>` and plumb the documented env vars — a drift test compares committed
+  **bytes** to rendered bytes, a parity test requires every stage exactly once per adapter, and a
+  no-logic check rejects any other evalops subcommand (narrow shell allowlist). The GitHub pr job
+  checks out `refs/pull/<N>/head` from the base repository so a fork PR works with WP2.2's bot
+  branch, and the generated comment states the write-token repository prerequisite; the Jenkins
+  pipeline declares the `EVALOPS_ALLOW_FROZEN_CHANGE` parameter it documents, and its four `when`
+  conditions are pairwise disjoint per cause (a scheduled build of `main` selects nightly only).
+  329 → 353 tests. Review: 1 BLOCK (Jenkins trigger overlap, fork checkout ref, byte-level drift,
+  over-broad `git` allowlist, undocumented fork-token policy, undeclared Jenkins parameter) + a
+  narrow re-review PASS after the fixes.
 - **WP2.2 release re-verification (2026-10-24):** `pipeline release` re-verifies before promoting:
   `guard` → `gate --group $EVIDENCE_GROUP` (a fresh re-check — a group failing today's rules stops
   the stage at exit 1 before any alias moves) → `baseline` (a recorded verification step; the

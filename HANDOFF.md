@@ -1,22 +1,22 @@
-# HANDOFF: evalops — phase 2 in progress (WP2.1 + WP2.2 + WP2.3 done; WP2.4/2.5 remain)
+# HANDOFF: evalops — phase 2 in progress (WP2.1 + WP2.2 + WP2.3 + WP2.4 done; WP2.5 remains)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
 (tests: **321 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 has WP2.4 (CI
-adapters) and WP2.5 (calibration enforcement) open. The completed
-`docs/packets/WP2.1.md` / `WP2.3.md` are the packet templates.
+`docs/STATE.md` is the short status board; phase 1 is closed (G1) and phase 2 has WP2.5
+(calibration enforcement) open. The completed `docs/packets/WP2.2.md` / `WP2.4.md` are the packet
+templates.
 
 ## 0. Current snapshot (start here)
 
 | | |
 |---|---|
-| Verified base | `eed5e96` (WP2.2 `86f75fa` + its docs commit) — CI runs `40095127593` / `40095552958` green on py3.10 / 3.11 / 3.12; this handoff refresh sits on top |
-| Tests | 329 offline (`make check`), standalone 329/329, 1 Postgres contract test (excluded) |
+| Verified base | `26d292c` (WP2.4) — CI runs `40100892525` (WP2.4 feature) green on py3.10 / 3.11 / 3.12; this docs commit sits on top |
+| Tests | 353 offline (`make check`), standalone 353/353, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
-| Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`), **WP2.2 done** (`86f75fa`); **WP2.4 / WP2.5 remain** |
+| Phase 2 | **WP2.1 done** (`135bf0e` + exec-bit `b670d7b`), **WP2.3 done** (`684c629`), **WP2.2 done** (`86f75fa`), **WP2.4 done** (`26d292c`); **WP2.5 remains** |
 | Tree | clean; no uncommitted work |
-| Next artifact | `docs/packets/WP2.4.md` (copy `docs/packets/WP2.2.md`, the newest template) |
+| Next artifact | `docs/packets/WP2.5.md` (copy `docs/packets/WP2.4.md`, the newest template) |
 | Gate ahead | **G2**: pipeline parity, 7 presets, calibration enforced; tag **v0.4.0** |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
@@ -293,18 +293,25 @@ pinned. Two non-blocking reviewer nits are available as optional cleanups: `_pla
 sets `entry["reason"]` in two consecutive branches that collapse to one `if step.reason:`, and the
 worker's M1 mutation claim named one red test where two actually went red (stronger, not weaker).
 
-### WP2.4 — CI adapters generated from one template (NEXT)
+### WP2.4 — CI adapters generated from one template (DONE, `26d292c`)
 
-Write the packet from the map's phase-2 row. All four adapters (GH/GitLab/Azure/Jenkins) render
-from one template and call `evalops pipeline` — no logic in YAML — with a snapshot test. The
-capabilities generator (`make capabilities`) is the code→doc pattern to mirror. Grounding: `ci/`
-today holds three hand-written adapters (`github-actions.yml`, `gitlab-ci.yml`,
-`azure-pipelines.yml`) plus the `pipeline.sh` shim; **Jenkins does not exist yet** (created new).
-The adapters set `EVALOPS_PR`/`EVALOPS_BRANCH`/`EVIDENCE_GROUP` — WP2.2's bot-branch rule
-(`evalops/state/pr-<EVALOPS_PR>`) is the fork-PR behavior they must surface. Decide (and pin in
-the packet) whether the template is Python-rendered into committed YAML (like
-`make capabilities` → `docs/CAPABILITIES.md`, with a drift test) or a generator script; the map's
-"no logic in YAML" is the invariant either way.
+All four adapters render from one template in core (`src/evalops/ci_adapters.py`: a per-stage
+binding table over `pipeline.STAGES`, four renderers, `write_adapters`), in the shape of the two
+existing generators. `evalops ci-adapters` reports the four (sorted, writes nothing) or
+`--write`s them; `make ci-adapters` regenerates `ci/github-actions.yml`, `ci/gitlab-ci.yml`,
+`ci/azure-pipelines.yml` and the new `ci/Jenkinsfile` with zero diff. The rendered files bind
+platform events to `bash ci/pipeline.sh <stage>` and plumb the documented env vars only: a drift
+test compares **bytes** (a CRLF-only drift fails too), a parity test requires every stage exactly
+once per adapter, and a no-logic check rejects any other evalops subcommand with a narrow shell
+allowlist (`git checkout -B`/`git remote set-url`/`git fetch`, `pip install`, the shim, plus the
+explicit gate/drift report sinks). Fork PRs: the pr job checks out `refs/pull/<N>/head` from the
+base repository (a fork-only branch is not in origin) and `EVALOPS_PR` routes state to the WP2.2
+bot branch; the generated comment documents the write-token repository setting fork PRs need.
+Jenkins declares the `EVALOPS_ALLOW_FROZEN_CHANGE` parameter it documents, and its four `when`
+conditions are pairwise disjoint per cause. 24 new tests (329 → 353). Review: 1 BLOCK (Jenkins
+scheduled-main overlap, fork checkout ref, text-vs-bytes drift, `git push` allowlist hole,
+undocumented fork token policy, undeclared Jenkins parameter) + narrow re-review PASS; the
+reviewer reproduced the CRLF and `git push` mutations independently.
 
 ### WP2.5 — calibration enforcement in the pipeline (NEXT)
 
@@ -322,7 +329,7 @@ After 2.4 + 2.5: run the map's G2 checklist and tag **v0.4.0** (D10).
 
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
-| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **next**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins); 2.5 calibration enforced in the pipeline | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
+| **2** CLI/pipeline as code + presets | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
 | **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned = exit 2); 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement, resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
@@ -381,8 +388,9 @@ tests/
   fixtures/              fake apps, v0 format fixtures, envelope goldens
 docs/                    IMPLEMENTATION_MAP, CONTRACT, STATE, PLUGINS, AGENT_TRACES, MLFLOW_*, adr/,
                          packets/ (dispatch-ready WP packets)
-ci/                      pipeline.sh (shim → `evalops pipeline`) + GH/GitLab/Azure adapters (WP2.4
-                         regenerates all four from one template)
+ci/                      pipeline.sh (shim → `evalops pipeline`) + the four generated adapters
+                         (`github-actions.yml`, `gitlab-ci.yml`, `azure-pipelines.yml`, `Jenkinsfile`)
+                         rendered by `make ci-adapters` from `src/evalops/ci_adapters.py`
 ```
 
 ## 10. First commands in the new thread
@@ -396,8 +404,9 @@ sed -n '/### Phase 2/,/### Phase 3b/p' docs/IMPLEMENTATION_MAP.md
 
 Then:
 
-1. **Check §4's coordination rules first.** If `origin/main` already has a WP2.4 (or WP2.5)
-   feature commit, take the other one instead (disjoint trees) and cross-check their work; if
+1. **Check §4's coordination rules first.** If `origin/main` already has a WP2.5 feature commit,
+   cross-check it against `docs/packets/WP2.5.md` before doing anything else; otherwise write the
+   WP2.5 packet (copy `docs/packets/WP2.4.md`'s shape) and dispatch it to `evalops-worker`
    not, write the WP2.4 packet from the map's phase-2 row (copy `docs/packets/WP2.2.md`'s shape —
    it is the newest template) and dispatch it to `evalops-worker` (`deepseek/deepseek-flash`, cwd
    = the repo). Read the current `ci/*.yml` adapters and the capabilities generator

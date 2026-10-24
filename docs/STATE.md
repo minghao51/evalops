@@ -5,21 +5,23 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 ## Where we are
 
 - **Phase:** **phase 2 in progress** — WP2.1 (`evalops pipeline`), WP2.2 (release
-  re-verification, released-group binding, fork-PR bot branch, nightly loud failure) and WP2.3
-  (presets + init + capability matrix) done; remaining: WP2.4 (CI adapters), WP2.5 (calibration
-  enforcement), then G2 (tag v0.4.0). Phase 1 is closed (G1).
-- **Verified base:** `eed5e96` (WP2.2 `86f75fa` + docs); **tests:** 329 green (`make check`).
+  re-verification, released-group binding, fork-PR bot branch, nightly loud failure), WP2.3
+  (presets + init + capability matrix) and WP2.4 (four CI adapters generated from one template)
+  done; remaining: WP2.5 (calibration enforcement), then G2 (tag v0.4.0). Phase 1 is closed (G1).
+- **Verified base:** `26d292c` (WP2.4) — **tests:** 353 green (`make check`), standalone 353/353.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
-  `main` (last completed runs: `40095127593` WP2.2 feature, `40095552958` WP2.2 docs).
+  `main` (last completed runs: `40095127593` WP2.2 feature, `40095552958` WP2.2 docs,
+  `40100892525` WP2.4 feature).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
   compatibility; `make check` 283, standalone 283/283, `make schema` zero drift, goldens untouched;
   Postgres contract 1 passed (`.[sql,dev]`, docker). CI run `40078618397`.
-- **Next:** WP2.4 (CI adapters: GH/GitLab/Azure/Jenkins rendered from one template, calling
-  `evalops pipeline`) and WP2.5 (calibration enforcement in the pipeline) are the open phase-2
-  WPs; then G2 (tag v0.4.0). Packet shape: `docs/packets/WP2.2.md` (newest) / `WP2.3.md`.
-  Contract suite: `make contract` with `evalops[sql]` installed.
+- **Next:** WP2.5 (calibration enforcement in the pipeline: below
+  `judges.<name>.min_agreement`/`min_kappa` fails `pr`, naming the judge and the measured vs
+  required value) is the last open phase-2 WP; then G2 (tag v0.4.0). Packet shape:
+  `docs/packets/WP2.4.md` (newest) / `WP2.2.md`. Contract suite: `make contract` with
+  `evalops[sql]` installed.
 
 ## Work packages
 
@@ -40,6 +42,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 2.1 `evalops pipeline <stage>` (stage table, dry-run, idempotence, bash shim) | done | `135bf0e` + exec-bit fix `b670d7b` (narrow re-review PASS) |
 | 2.3 presets (`init --preset` ×7) + `evalops capabilities` + generated `docs/CAPABILITIES.md` | done | `684c629` (1 review round: PASS, 0 defects) |
 | 2.2 release re-verification + released-group binding + fork-PR bot branch + nightly loud failure | done | `86f75fa` (1 review round: PASS, 0 defects) |
+| 2.4 CI adapters generated from one template (`ci_adapters.py`, `evalops ci-adapters`, `make ci-adapters`, `ci/Jenkinsfile`) | done | `26d292c` (1 BLOCK: 6 defects + narrow re-review PASS) |
 | **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
 
 ## Known compromises (tracked, not forgotten)
@@ -95,6 +98,7 @@ make schema           # regenerate docs/evalops.schema.json
 make capabilities     # regenerate docs/CAPABILITIES.md
 .venv/bin/evalops pipeline pr --dry-run   # list the CI stage steps; writes nothing
 .venv/bin/evalops init --preset local --dir /tmp/new-project   # render a starter evalops.yaml
+make ci-adapters      # regenerate ci/*.yml + ci/Jenkinsfile from src/evalops/ci_adapters.py
 ```
 
 Rules that matter: persisted formats are additive and versioned; a green suite is not evidence of a
