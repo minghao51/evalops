@@ -307,6 +307,10 @@ Rules:
   silently re-associate stored results (WP1.3).
 - WP0.4 proves invariance with golden tests: v0 fixture parses, v1 round-trips, and metadata
   stamping leaves `app_version` and cassette fingerprints byte-identical.
+- `row_key` (WP1.3) is an **additive** per-row field in `evalops/rows.jsonl`: it is a consumer of the
+  identity rules above, never an input to any identity hash. It never enters `dataset fingerprint`,
+  `app_version` or the cassette fingerprint; a v0 rows artifact without it still reads (the gate then
+  falls back to `row_id`). §9 fixes its exact definition.
 
 ## 5. Persisted-format policy
 
@@ -493,3 +497,100 @@ A plugin is installable independently; `evalops` core has no vendor dependency o
 - [ ] No vendor import exists outside `src/evalops/plugins/` and `src/evalops/traces/`
       (`tests/unit/test_no_vendor_imports.py`).
 - [ ] An unpinned judge fails the gate; a resolved model is recorded per verdict.
+
+## 9. Statistics and gate diagnostics (WP1.3, additive)
+
+This section defines the numbers the gate reports. It is additive: no rule above changes meaning,
+no existing key is renamed, and every diagnostic below is reported in the `--json` envelope and
+`gate_report.md` **without** altering any check outcome.
+
+### 9.1 Dispersion, and the two confidence intervals
+
+- **Standard deviation is the sample (n-1) one.** `std` keeps its name and now means
+  `statistics.stdev(vals)` everywhere evalops reports dispersion; `n == 1` reports `0.0` instead of
+  raising. No gate rule reads `std` implicitly: every threshold is an explicit configured key, so a
+  rule's meaning never changes with this convention.
+- **`ci_lower` (the `min_ci_lower` rule) is the normal approximation:**
+  `mean - z * sample_stdev / sqrt(n)` with `z = 1.96`, `None` below `n == 2`. This is unchanged.
+- **`wilson_interval(successes, n, z=1.96)`** is the proportion interval, reported as
+  `{lower, upper, method: "wilson", n, k}`; `None` when `n == 0`. It is used for the proportions the
+  reliability block reports (`pass_hat_k`, `pass_at_k`, `success_rate`) and stays inside `[0, 1]`,
+  with `lower == 0.0` at `k == 0` and `upper == 1.0` at `k == n`.
+- **`bootstrap_ci(vals, resamples=2000, seed=0, alpha=0.05)`** is a
+  `{lower, upper, method: "bootstrap-percentile", resamples, n}` percentile bootstrap of the mean:
+  deterministic for the same input and seed (the RNG is local to the call), `None` below two values.
+- **`min_ci_lower_bootstrap`** is a new optional per-metric rule that uses the bootstrap interval's
+  lower bound; it never replaces `min_ci_lower`, whose meaning is frozen above.
+
+### 9.2 pass^k: exact semantics
+
+For every case (identified as in §9.3) the success vector is ordered by the run's `evalops.repeat`
+**as an integer**; when that order cannot be established (missing, non-numeric or duplicate repeat
+tags) the group's positional order is used and the result says `unordered_repeats: true` — a string
+sort would place repeat `"10"` before `"2"`, which is not an order.
+
+With `k = min(len(vector))` over all cases, `C` cases and `N` total repeats:
+
+- `pass_hat_k = (1/C) * sum(all(vector[:k]))` — succeeds on **every one** of the first k repeats.
+- `pass_at_k = (1/C) * sum(any(vector[:k]))`.
+- `success_rate = total successes / N`.
+
+This is the **plug-in estimator**: "all k observed repeats", not the combinatorial
+"at least k of n". A case cannot have fewer repeats than `k` by construction; the block still
+reports `cases_with_fewer_repeats` (cases missing from at least one run) for transparency and sets
+`comparable: false` when it is non-zero, because a ragged matrix compares different denominators.
+
+- **`min_pass_hat_k_wilson`** (WP1.3b) is an optional reliability rule that gates the *lower* end of
+  the `pass_hat_k` Wilson interval instead of the point estimate: the check is
+  `pass_hat_k_ci.lower >= <threshold>` and fails when the interval is missing. `min_pass_hat_k` and
+  `max_drop_pass_hat_k` keep their point-estimate meaning.
+
+### 9.3 Row identity
+
+`row_key = sha256(canonical({"inputs": ..., "expectations": ...}))[:16]`, with `expectations`
+normalized exactly like the dataset fingerprint (missing/empty → `None`). Metadata, backend ids and
+recorded `outputs`/`trace` never reach it.
+
+Identical rows are interchangeable, so a duplicated key gets a deterministic occurrence suffix by
+file order (`<key>#1`, `<key>#2`, …); a unique row carries the bare key. Reordering *distinct* rows
+therefore changes no key.
+
+`row_key` is written additively on every row of `evalops/rows.jsonl` (evaluate **and** re-score
+paths; calibration rows too) and read back as `RowResult.row_key`. Row-level statistics
+(`reliability`, `paired_drift`) align on `row_key` **only when every row in every run carries one**,
+and otherwise fall back to `row_id`, reporting `aligned_by: "row_id"`. A v0 rows artifact without
+`row_key` therefore still gates, just positionally.
+
+### 9.4 Baseline pinning
+
+`evalops promote --alias production` tags each new baseline run with
+`evalops.baseline.app_version` and `evalops.baseline.dataset_fingerprint`, read from that run's
+params. `run_gate` reports `baseline: {group, app_version, dataset_fingerprint, pinned}` and adds
+two **failing-only** checks:
+
+- `baseline dataset fingerprint matches` — the candidate's `dataset_fingerprint` differs from the
+  baseline's: comparing different data is not a drift measurement.
+- `baseline pin matches run` — a baseline that carries pin tags disagreeing with its own params was
+  moved or tampered with.
+
+No baseline → no check, exactly as before. Both checks are absent when there is nothing to compare.
+
+### 9.5 Drift and change attribution
+
+`drift(cand_runs, base_runs, rules)` reports, for every metric a rule names and every metric present
+in both aggregates: `delta`, `pct_change`, `cohen_d` (pooled sample sd), `z = delta /
+sqrt(se_c^2 + se_b^2)` with `se = sample_stdev / sqrt(n)`, the two-sided `p = erfc(|z| / sqrt(2))`
+(no scipy), and `significant = p < 0.05`. `z`/`p`/`cohen_d` are `None` when the runs give no
+dispersion to test against.
+
+`paired_drift` adds per-row-key pairing for metrics that have row values on both sides: `aligned`,
+`unaligned`, `mean_delta`, `ci` (bootstrap) and `significant`. It is only included in `drift` when
+alignment is by `row_key`; a `row_id` alignment is positional and pairing it would invent a
+correspondence.
+
+`attribution(cand_runs, base_runs)` compares the newest run of each group over identity/provenance
+params only (`app_version`, `config_hash`, `git_sha`, `git_dirty`, `dataset`,
+`dataset_fingerprint`, `dataset_physical`, `tool_mode`, `tool_cassette`, `source_group`, plus every
+`prompt.*`, `judge.*` and `plugin.*` key), as strings. `behavior_config` is excluded (it is truncated
+JSON, so its diff is noise). The result is `{changed: {param: {candidate, baseline}}, summary}`; it
+contains identifiers only, never row payloads.

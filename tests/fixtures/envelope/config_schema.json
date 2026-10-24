@@ -460,7 +460,7 @@
         },
         "MetricRule": {
           "additionalProperties": false,
-          "description": "A gate rule for one metric. Exactly these five keys; anything else is a typo.",
+          "description": "A gate rule for one metric. Six keys now; ``min_ci_lower`` is the normal-approximation lower\nbound, ``min_ci_lower_bootstrap`` the deterministic bootstrap-percentile lower bound. Anything\nelse is a typo.",
           "properties": {
             "min": {
               "anyOf": [
@@ -521,6 +521,18 @@
               ],
               "default": null,
               "title": "Min Ci Lower"
+            },
+            "min_ci_lower_bootstrap": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Ci Lower Bootstrap"
             }
           },
           "title": "MetricRule",
@@ -685,6 +697,7 @@
         },
         "ReliabilityRule": {
           "additionalProperties": false,
+          "description": "pass^k rules: the point estimate (``min_pass_hat_k`` / ``max_drop_pass_hat_k``) and the\nWilson lower bound of ``pass_hat_k`` (``min_pass_hat_k_wilson``).",
           "properties": {
             "success": {
               "items": {
@@ -716,6 +729,18 @@
               ],
               "default": null,
               "title": "Max Drop Pass Hat K"
+            },
+            "min_pass_hat_k_wilson": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min Pass Hat K Wilson"
             }
           },
           "title": "ReliabilityRule",

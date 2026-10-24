@@ -86,13 +86,16 @@ class CostConfig(_Strict):
 
 
 class MetricRule(_Strict):
-    """A gate rule for one metric. Exactly these five keys; anything else is a typo."""
+    """A gate rule for one metric. Six keys now; ``min_ci_lower`` is the normal-approximation lower
+    bound, ``min_ci_lower_bootstrap`` the deterministic bootstrap-percentile lower bound. Anything
+    else is a typo."""
 
     min: float | None = None
     max: float | None = None
     max_drop: float | None = None
     max_increase_pct: float | None = None
     min_ci_lower: float | None = None
+    min_ci_lower_bootstrap: float | None = None
 
 
 class GateCostRule(_Strict):
@@ -106,9 +109,13 @@ class ReliabilitySuccess(_Strict):
 
 
 class ReliabilityRule(_Strict):
+    """pass^k rules: the point estimate (``min_pass_hat_k`` / ``max_drop_pass_hat_k``) and the
+    Wilson lower bound of ``pass_hat_k`` (``min_pass_hat_k_wilson``)."""
+
     success: list[ReliabilitySuccess] = Field(default_factory=list)
     min_pass_hat_k: float | None = None
     max_drop_pass_hat_k: float | None = None
+    min_pass_hat_k_wilson: float | None = None
 
 
 class GatesConfig(_Strict):

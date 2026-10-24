@@ -42,6 +42,10 @@ class RowResult:
     error: str | None = None
     trace: Any = None  # evalops.traces.AgentTrace (normalized, framework-neutral)
     trace_metrics: dict[str, float] = field(default_factory=dict)
+    # Stable per-row identity (CONTRACT §4, additive): `datasets.row_key` of the record this row
+    # was evaluated from. Appended so positional constructors stay valid; None means a v0 writer
+    # and readers fall back to `row_id`.
+    row_key: str | None = None
 
 
 @dataclass

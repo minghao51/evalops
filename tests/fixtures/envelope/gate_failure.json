@@ -8,6 +8,14 @@
     "summary": "gate FAILED for group g1",
     "group": "<id>",
     "baseline_group": null,
+    "baseline": null,
+    "aligned_by": null,
+    "reliability": null,
+    "drift": null,
+    "attribution": {
+      "changed": {},
+      "summary": "no baseline run to attribute against"
+    },
     "checks": [
       {
         "check": "facts/mean >= 0.95",

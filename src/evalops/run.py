@@ -108,6 +108,7 @@ def rows_from_artifact(text, source: str = "evalops/rows.jsonl") -> list[RowResu
                 error=d.get("error"),
                 trace=AgentTrace.from_dict(d.get("trace")),
                 trace_metrics=d.get("trace_metrics") or {},
+                row_key=d.get("row_key"),  # additive: v0 rows have no stable key
             )
         )
     return rows
@@ -257,6 +258,7 @@ def _evaluate(
 
     stored = None
     if kind == "calibration":  # pre-recorded outputs/traces in the dataset itself
+        keys = ds_mod.row_keys(records)
         stored = [
             RowResult(
                 f"{i:05d}",
@@ -264,6 +266,7 @@ def _evaluate(
                 r.get("outputs"),
                 r.get("expectations"),
                 trace=AgentTrace.from_dict(r.get("trace")),
+                row_key=keys[i],
             )
             for i, r in enumerate(records)
         ]

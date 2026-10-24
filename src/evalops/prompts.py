@@ -103,7 +103,15 @@ def promote(cfg: Any, reg: Any, alias: str, evidence_group: str) -> dict[str, An
         for r in ledger.find_runs(tags={"evalops.baseline": "true"}):
             ledger.log(r.run_id, tags={"evalops.baseline": "false"})
         for r in runs:
-            ledger.log(r.run_id, tags={"evalops.baseline": "true"})
+            # Pin the baseline to what produced it (CONTRACT §4, D5): a gate can then tell "the
+            # candidate ran on different data" from "the candidate drifted". Additive tags; a
+            # reader falls back to the run's own params when they are absent (v0 baselines).
+            pin = {
+                "evalops.baseline": "true",
+                "evalops.baseline.app_version": r.params.get("app_version") or r.tags.get("evalops.app_version"),
+                "evalops.baseline.dataset_fingerprint": r.params.get("dataset_fingerprint"),
+            }
+            ledger.log(r.run_id, tags={k: str(v) for k, v in pin.items() if v})
     for r in runs:
         ledger.log(r.run_id, tags={f"evalops.promoted.{alias}": json.dumps(moves)})
     return {"summary": f"moved @{alias} for {len(moves)} prompt(s) via {store.name}", "moves": moves}

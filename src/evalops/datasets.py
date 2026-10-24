@@ -8,6 +8,7 @@ metadata, never a dataset name.
 
 import json
 import os
+from collections import Counter
 from typing import Any
 
 from . import locks
@@ -37,6 +38,39 @@ def read_records(path) -> list[dict]:
 def fingerprint(records: list[dict]) -> str:
     rows = sorted(canonical(_identity_fields(r)) for r in records)
     return sha256("\n".join(rows))
+
+
+def row_key(record: dict) -> str:
+    """Stable per-row identity: `sha256` of the row's semantic fields, truncated to 16 hex chars.
+
+    Covers `inputs` and `expectations` only, with `expectations` normalized like the dataset
+    fingerprint (missing/empty -> `None`), so backend metadata, file order and row ids never reach
+    the key. This is the additive row identity of CONTRACT §4: stored results are re-associated by
+    content, never by list index.
+    """
+    sem = formats.semantic(record, FINGERPRINT_KEYS)
+    out = {"inputs": sem.get("inputs"), "expectations": sem.get("expectations") or None}
+    return sha256(canonical(out))[:16]
+
+
+def row_keys(records: list[dict]) -> list[str]:
+    """`row_key` for each record in file order, disambiguating identical rows.
+
+    Identical rows are interchangeable, so only a duplicated key gets a deterministic occurrence
+    suffix (`<key>#1`, `<key>#2`, ... in file order); reordering *distinct* rows therefore never
+    changes any key, and two identical rows still get distinct identities.
+    """
+    keys = [row_key(r) for r in records]
+    counts = Counter(keys)
+    seen: Counter[str] = Counter()
+    out = []
+    for key in keys:
+        if counts[key] == 1:
+            out.append(key)
+            continue
+        seen[key] += 1
+        out.append(f"{key}#{seen[key]}")
+    return out
 
 
 def _identity_fields(record: dict) -> dict:

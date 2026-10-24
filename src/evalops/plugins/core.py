@@ -11,8 +11,11 @@ import inspect
 import random
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, cast
 
+from .. import datasets
 from ..ports import EvalResult, Evaluator, Plugin, RowResult, Tracer, Usage
 from ..scoring import aggregate_rows, call_scorer, scorer_name
 from ..tools import ToolReplayMiss
@@ -50,7 +53,7 @@ def _syncify(fn, timeout):
     return run
 
 
-def _retry(call, retries, backoff, limiter):
+def _retry(call, retries, backoff, limiter) -> Any:
     for attempt in range(retries + 1):
         try:
             limiter.wait()
@@ -90,6 +93,9 @@ class CorePlugin(Plugin, Tracer, Evaluator):
         stored_rows=None,
     ):
         workers = int(concurrency.get("max_workers", 4))
+        # Stable row identity (CONTRACT §4): the key covers inputs + expectations only, never the
+        # list index, so reordering a dataset cannot re-associate stored results.
+        keys = datasets.row_keys(records)
         scorer_workers = max(1, min(int(concurrency.get("max_scorer_workers", 2)), len(scorers) or 1))
         retries = int(concurrency.get("retries", 3))
         backoff = float(concurrency.get("backoff_seconds", 1.0))
@@ -103,7 +109,8 @@ class CorePlugin(Plugin, Tracer, Evaluator):
             instrument(tcfg.get("instrument") or [])
 
         def score(row: RowResult):
-            def one(s):
+            def one(s) -> Any:
+                """A scorer's scores, or an ``{"__error__": msg}`` sentinel (one pool.map carries both)."""
                 try:
                     return _retry(
                         lambda: call_scorer(
@@ -126,8 +133,13 @@ class CorePlugin(Plugin, Tracer, Evaluator):
 
         def run_row(item):
             i, rec = item
-            row = RowResult(row_id=f"{i:05d}", inputs=rec["inputs"], expectations=rec.get("expectations"))
-            traced = tracer.wrap(predict, run_id=run_id, row_id=row.row_id)
+            row = RowResult(
+                row_id=f"{i:05d}",
+                inputs=rec["inputs"],
+                expectations=rec.get("expectations"),
+                row_key=keys[i],
+            )
+            traced = tracer.wrap(cast(Callable, predict), run_id=run_id, row_id=row.row_id)
             caps = []
 
             def attempt():  # fresh capture per attempt: a failed attempt's spans never pollute the trace
@@ -170,6 +182,7 @@ class CorePlugin(Plugin, Tracer, Evaluator):
                                 trace_id=r.trace_id,
                                 trace=r.trace,
                                 trace_metrics=dict(r.trace_metrics),
+                                row_key=r.row_key,
                             )
                             for r in stored_rows
                         ],

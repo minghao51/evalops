@@ -173,12 +173,24 @@ def test_unknown_top_level_and_nested_keys_name_their_path():
     ]
 
 
-def test_metric_rule_accepts_exactly_the_five_documented_keys():
+def test_metric_rule_accepts_exactly_the_six_documented_keys():
     ok = {**BASE, "gates": {"metrics": {"tool_trajectory/mean": {"min": 0.9, "min_ci_lower": 0.85}}}}
     assert _cfg(ok).section("gates")["metrics"]["tool_trajectory/mean"]["min_ci_lower"] == 0.85
-    for key in ("min", "max", "max_drop", "max_increase_pct", "min_ci_lower"):
+    for key in ("min", "max", "max_drop", "max_increase_pct", "min_ci_lower", "min_ci_lower_bootstrap"):
         assert _cfg({**BASE, "gates": {"metrics": {"m": {key: 1}}}}).section("gates")["metrics"]["m"] == {key: 1}
     assert _paths(_error({**BASE, "gates": {"metrics": {"m": {"p95": 1}}}})) == ["gates.metrics.m.p95"]
+
+
+def test_reliability_rule_accepts_exactly_the_four_documented_keys():
+    """``min_pass_hat_k_wilson`` is a real rule; a typo next to it is still exit 2."""
+    ok = {**BASE, "gates": {"reliability": {"success": [{"metric": "m", "min": 1.0}], "min_pass_hat_k_wilson": 0.4}}}
+    rel = _cfg(ok).section("gates")["reliability"]
+    assert rel["min_pass_hat_k_wilson"] == 0.4 and rel["success"] == [{"metric": "m", "min": 1.0}]
+    for key in ("min_pass_hat_k", "max_drop_pass_hat_k", "min_pass_hat_k_wilson"):
+        assert _cfg({**BASE, "gates": {"reliability": {key: 1}}}).section("gates")["reliability"] == {key: 1}
+    assert _paths(_error({**BASE, "gates": {"reliability": {"min_pass_hat_kk": 1}}})) == [
+        "gates.reliability.min_pass_hat_kk"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +321,13 @@ def test_schema_is_regenerable_and_describes_the_shipped_config():
         "max_increase_pct",
         "min",
         "min_ci_lower",
+        "min_ci_lower_bootstrap",
+    ]
+    assert sorted(schema["$defs"]["ReliabilityRule"]["properties"]) == [
+        "max_drop_pass_hat_k",
+        "min_pass_hat_k",
+        "min_pass_hat_k_wilson",
+        "success",
     ]
     # WP0.3b: the closed key sets are in the schema as objects with exactly these properties
     plugins = schema["$defs"]["PluginsConfig"]
