@@ -46,6 +46,20 @@ needs none for SQLite (the `sql` extra adds the Postgres/MySQL drivers).
 | `mlflow` | ✓ | ✓ | ✓ | ✓ | ✓ | — | `mlflow` |
 | `sql` |  |  | ✓ |  |  | — | — |
 
+## Native judges
+
+Which evaluator has a native judge adapter (WP3b.2): a preset whose `evaluator` plugin is
+listed here runs a declared judge on the backend's own judge, and `Package` is the vendor
+package to install (`pip install <package>`) -- evalops extras do not cover it. A missing SDK
+is exit 6 with that hint. Evaluators without a row use the rubric fallback (WP3b.3).
+
+| Evaluator | Adapter | Package | Presets | Description |
+|---|---|---|---|---|
+| `core` | `pydantic-evals` | `pydantic-evals` | `local`, `logfire`, `mixed` | the pydantic-evals LLMJudge metric, run by the core evaluator |
+| `langfuse` | `langfuse-managed` | `langfuse` | `langfuse` | a Langfuse managed evaluator scores server-side; evalops reads the score back |
+| `langsmith` | `openevals` | `openevals` | `langsmith` | openevals create_llm_as_judge, the judge LangSmith's native evaluation runs |
+| `mlflow` | `mlflow-make-judge` | `mlflow` | `databricks`, `mlflow` | mlflow.genai.make_judge runs the rubric as a native MLflow judge |
+
 ## Legal plugins per role
 
 | Role | Plugins |

@@ -405,6 +405,39 @@ def test_capabilities_matrix_is_read_from_the_plugin_classes():
             assert presets.PRESETS[name].roles[role] in payload["roles"][role], (name, role)
 
 
+def test_the_native_judge_matrix_is_derived_from_the_adapters_and_presets():
+    """WP3b.2: the matrix lists which evaluator has a native judge, derived, never restated."""
+    from evalops.scorers import native
+
+    rows = presets.capabilities_payload()["native_judges"]
+    assert set(rows) == set(native.adapters()), "the matrix and the adapter registry disagree"
+    for evaluator, adapter in native.adapters().items():
+        row = rows[evaluator]
+        assert (row["adapter"], row["package"], row["description"]) == (
+            adapter.key,
+            adapter.package,
+            adapter.description,
+        ), evaluator
+        # the presets are derived from PRESETS, never a hand-maintained list
+        assert row["presets"] == sorted(name for name in D8 if presets.PRESETS[name].roles["evaluator"] == evaluator), (
+            evaluator
+        )
+    # spot checks against the preset table: databricks is served by mlflow, logfire/mixed by core
+    assert rows["mlflow"]["presets"] == ["databricks", "mlflow"]
+    assert rows["core"]["presets"] == ["local", "logfire", "mixed"]
+    assert rows["langfuse"]["presets"] == ["langfuse"]
+    assert rows["langsmith"]["presets"] == ["langsmith"]
+    # every preset's evaluator has a native judge, and the payload is deterministic
+    for name in D8:
+        assert native.has_native_judge(presets.PRESETS[name].roles["evaluator"]), name
+    assert presets.capabilities_payload()["native_judges"] == rows, "the matrix is not deterministic"
+    # the generated document renders one row per adapter (the drift test is mutation-sensitive below)
+    text = presets.capabilities_text()
+    assert "## Native judges" in text
+    for evaluator, row in rows.items():
+        assert f"| `{evaluator}` | `{row['adapter']}` | `{row['package']}` |" in text, evaluator
+
+
 # ---------------------------------------------------------------------------
 # (g) C2 + H4: the generated document and its drift sensitivity
 # ---------------------------------------------------------------------------

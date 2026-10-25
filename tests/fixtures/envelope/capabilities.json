@@ -220,6 +220,43 @@
         "mlflow",
         "none"
       ]
+    },
+    "native_judges": {
+      "core": {
+        "adapter": "pydantic-evals",
+        "package": "pydantic-evals",
+        "description": "the pydantic-evals LLMJudge metric, run by the core evaluator",
+        "presets": [
+          "local",
+          "logfire",
+          "mixed"
+        ]
+      },
+      "langfuse": {
+        "adapter": "langfuse-managed",
+        "package": "langfuse",
+        "description": "a Langfuse managed evaluator scores server-side; evalops reads the score back",
+        "presets": [
+          "langfuse"
+        ]
+      },
+      "langsmith": {
+        "adapter": "openevals",
+        "package": "openevals",
+        "description": "openevals create_llm_as_judge, the judge LangSmith's native evaluation runs",
+        "presets": [
+          "langsmith"
+        ]
+      },
+      "mlflow": {
+        "adapter": "mlflow-make-judge",
+        "package": "mlflow",
+        "description": "mlflow.genai.make_judge runs the rubric as a native MLflow judge",
+        "presets": [
+          "databricks",
+          "mlflow"
+        ]
+      }
     }
   },
   "errors": []

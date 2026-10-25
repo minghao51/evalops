@@ -1,11 +1,33 @@
 """LLM-judge helpers that stay backend- and model-neutral: YOU supply `judge`, a callable that calls
 your judge model and returns a score (float/bool/'yes'/'no'/dict). Pin its model + prompt version in
 judge_meta and calibrate it with `evalops calibrate` before trusting it in gates.
+
+Two kinds of wrapper live here (WP3b.2): `span_judge`/`trajectory_judge` wrap a judge *callable* you
+supply, and `spec_judge` wraps an *adapter* -- the native judge of the configured evaluator backend
+(:mod:`evalops.scorers.native`) -- from a declared `JudgeSpec`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from ..judges import JudgeSpec
 from ..scoring import scorer, to_float
+from .native import native_judge
+
+
+def spec_judge(spec: JudgeSpec, *, evaluator: str) -> Callable[..., float | None]:
+    """The evaluator's native judge for one declared spec, as a neutral scorer.
+
+    `evaluator` is the **plugin name** serving the `evaluator` role (`mlflow`, `langfuse`,
+    `langsmith`, `core`); the adapter table lives in `scorers.native`. An evaluator without an
+    adapter, or one whose SDK is not installed, raises `CapabilityError` -> exit 6 with a hint (the
+    full spec reaches the vendor call: rubric, pinned model, prompt version, sampling).
+
+    Choosing this wrapper from `evalops.yaml` automatically is WP3b.3; recording the resolved model
+    per verdict is WP3b.5 -- today you call it explicitly.
+    """
+    return native_judge(spec, evaluator=evaluator)
 
 
 def span_judge(judge, *, name: str, kind: str = "tool", select=None, max_spans: int = 10):

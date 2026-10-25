@@ -478,7 +478,7 @@ def plugins_for_role(role: str) -> list[str]:
 
 
 def capabilities_payload() -> dict[str, Any]:
-    """``evalops capabilities --json`` data: presets (D8 order) and plugins/roles (sorted)."""
+    """``evalops capabilities --json`` data: presets (D8 order), plugins/roles (sorted), native judges."""
     return {
         "presets": {
             name: {
@@ -491,6 +491,27 @@ def capabilities_payload() -> dict[str, Any]:
         },
         "plugins": plugin_matrix(),
         "roles": {role: plugins_for_role(role) for role in ROLES},
+        "native_judges": native_judge_matrix(),
+    }
+
+
+def native_judge_matrix() -> dict[str, dict[str, Any]]:
+    """``{evaluator plugin: {adapter, package, description, presets}}`` for the native judge adapters.
+
+    Adapter rows come from ``scorers.native.ADAPTERS`` (the only source of the registry) and
+    ``presets`` is *derived* from :data:`PRESETS` -- the presets whose ``evaluator`` role resolves to
+    that plugin -- so neither half can be restated by hand. Sorted like the rest of the payload.
+    """
+    from .scorers.native import adapters
+
+    return {
+        evaluator: {
+            "adapter": adapter.key,
+            "package": adapter.package,
+            "description": adapter.description,
+            "presets": sorted(name for name in PRESET_NAMES if PRESETS[name].roles["evaluator"] == evaluator),
+        }
+        for evaluator, adapter in adapters().items()
     }
 
 
@@ -555,6 +576,27 @@ def capabilities_text() -> str:
         for name, row in data["plugins"].items()
     ]
     lines += _table(["Plugin", *roles, "Aliases", "Extra"], rows)
+    lines += [
+        "",
+        "## Native judges",
+        "",
+        "Which evaluator has a native judge adapter (WP3b.2): a preset whose `evaluator` plugin is",
+        "listed here runs a declared judge on the backend's own judge, and `Package` is the vendor",
+        "package to install (`pip install <package>`) -- evalops extras do not cover it. A missing SDK",
+        "is exit 6 with that hint. Evaluators without a row use the rubric fallback (WP3b.3).",
+        "",
+    ]
+    rows = [
+        [
+            f"`{evaluator}`",
+            f"`{entry['adapter']}`",
+            f"`{entry['package']}`",
+            ", ".join(f"`{name}`" for name in entry["presets"]) or "—",
+            entry["description"],
+        ]
+        for evaluator, entry in data["native_judges"].items()
+    ]
+    lines += _table(["Evaluator", "Adapter", "Package", "Presets", "Description"], rows)
     lines += ["", "## Legal plugins per role", ""]
     rows = [[f"`{role}`", ", ".join(f"`{name}`" for name in data["roles"][role])] for role in roles]
     lines += _table(["Role", "Plugins"], rows)
