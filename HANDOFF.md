@@ -1,7 +1,7 @@
 # HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b in progress (WP3b.1 done; 3b.2 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **359 offline + 1 Postgres contract test, deselected**).
+(tests: **388 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
 `docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and the next
 work is **phase 3b** (judges, native-first): WP3b.1 `JudgeSpec` landed, WP3b.2 (native adapters)
@@ -110,12 +110,16 @@ Three agents, defined in `.pi/agents/` (project scope, symlinked at the session 
 |---|---|---|
 | `evalops-scout` | `deepseek/deepseek-flash` | read-only recon, compressed findings with `file:line` |
 | `evalops-worker` | `deepseek/deepseek-flash` | implements exactly one WP, tests green, **no commits** |
-| `evalops-reviewer` | `zai/glm-5.3-flash` @ high | adversarial review: runs commands, falsifies claims, PASS/BLOCK |
+| `codex-luna-reviewer` (user scope, `~/.pi/agent/agents/`) | `openai-codex/gpt-6-luna` @ **xhigh** | adversarial review: runs commands, falsifies claims, PASS/BLOCK — **the current verified route** (WP2.4 + WP3b.1) |
+| `evalops-reviewer` (project scope) | `zai/glm-5.3-flash` @ high | previous reviewer route (WP1.x–WP2.3); fine when zai has quota |
 
 Fallback, verified 2026-10-24: `opencode-go/deepseek-v4.1-flash` (`OPENCODE_API_KEY`) runs the
 worker/scout role when the official deepseek key is unavailable — same model, different gateway;
 both routes were dispatched through the real agent harness and produced equivalent smoke reports
-(one agent-level A/B dispatch per route).
+(one agent-level A/B dispatch per route). `deepseek/deepseek-flash` **is** DeepSeek-V4.1-Flash on
+the official API (`GET /models`), so the worker model name is stable across both gateways. A second
+reviewer fallback exists: `evalops-reviewer-alt` (user scope, `opencode-go/glm-5.3`, high) — used
+for the WP2.4 cross-check and WP2.5 when zai's quota ran out; both runs PASS, 0 defects.
 
 ### Coordinating with the OTHER orchestrator session (read this — it happened twice)
 
@@ -133,8 +137,8 @@ the G1 close and WP2.1 while another session was working. Before you start anyth
    missing exec bit → `b670d7b`). Local side branches `wp12-alternative-33ec945`,
    `wp21-alternative-fe6a1c5`, `wp22-alternative-ad5db19` and `crosscheck/wp2.4-mine` exist on this
    machine as references.
-4. **Stay in disjoint trees when racing:** if their docs commit says "WP3b.1 is next", take
-   WP3b.2 (or the next untouched WP) instead (the project's own rule: two parallel workers only in
+4. **Stay in disjoint trees when racing:** if their docs commit says "WP3b.2 is next", take
+   WP3b.3 (or the next untouched WP) instead (the project's own rule: two parallel workers only in
    disjoint trees). Phase 3b's WPs touch the same files (`config/models.py`, `scoring.py`,
    `scorers/judges.py`, `run.py`), so **serialize** them unless a packet's allowed paths are
    provably disjoint; do not race two workers inside 3b.
@@ -160,6 +164,7 @@ Observed review budget:
 | WP2.2 release re-verification | 1 (PASS, 0 defects; reviewer re-ran the fixture paths, the envelope check and all 4 mutations) | 0 |
 | WP2.4 CI adapters (parallel session) + cross-check of an independent duplicate | 1 BLOCK (6 defects) + narrow re-review PASS; the duplicate found no blocking defect (the fork-guard removal is a documented, reviewed decision — see §6) | 6 |
 | WP2.5 calibration enforcement | 1 (PASS, 0 defects; reviewer rebuilt the fixture, re-ran the pr/main failing and passing runs, and all 4 mutations) | 0 |
+| WP3b.1 JudgeSpec | 2 BLOCK + 1 orchestrator adjudication + narrow PASS (`Infinity` in the envelope + `OverflowError`; parser digit-limit exit 5 + un-normalised int bounds; the layer-naming point was adjudicated, not a defect — the test now pins the exact per-layer path) | 7 |
 
 Reviewer route: `evalops-reviewer` pins `zai/glm-5.3-flash`. On 2026-10-24 zai's 5-hour quota was
 exhausted mid-session, so the WP2.4 cross-check and WP2.5 reviews ran on a substitute
@@ -515,7 +520,7 @@ ci/                      pipeline.sh (shim → `evalops pipeline`) + the four ge
 ## 10. First commands in the new thread
 
 ```bash
-cd evalops && make check                                   # expect 359 passed, 1 deselected
+cd /home/howt/work/evalops_universal/evalops && make check      # expect 388 passed, 1 deselected
 git fetch origin && git log --oneline main..origin/main     # is the other session ahead? which WP?
 gh run list --limit 1                                       # confirm CI green on main
 git tag -l v0.4.0                                          # phase 2 close marker
@@ -526,65 +531,63 @@ sed -n '/### WP3b.2/,/^## 7/p' HANDOFF.md                  # the pickup brief
 Then:
 
 1. **Check §4's coordination rules first.** `git fetch` + `git log --oneline main..origin/main`:
-   if the other session has already started phase 3b, cross-check its packet/commit against the
-   map's phase-3b row before doing anything else (disjoint trees or take the next WP).
-2. **Write the WP3b.1 packet** (`docs/packets/WP3b.1.md`, copying `docs/packets/WP2.5.md`'s shape)
-   from the map's phase-3b row: `JudgeSpec` with `judges.<name>.model` as the pin, unpinned →
-   exit 2 (never a warning), `judge_meta()` may only add — not override — the pin, and the resolved
-   model recorded per verdict. Read `docs/CONTRACT.md` §6 / D11, `src/evalops/scoring.py` and the
-   current `judge_meta` hook before writing it. Dispatch `evalops-worker`
-   (`deepseek/deepseek-flash`, cwd = the repo), then review with `evalops-reviewer`
-   (`zai/glm-5.3-flash`, thinking `high`).
+   if the other session has already landed a phase-3b WP, cross-check its commit against the map's
+   phase-3b row before doing anything else (disjoint trees or take the next WP).
+2. **Write the WP3b.2 packet** (`docs/packets/WP3b.2.md`, copying `docs/packets/WP3b.1.md`'s shape)
+   from the map's phase-3b row: the four native judge adapters (MLflow `make_judge`, Langfuse
+   managed evaluators with server-side execution + score read-back, openevals for LangSmith,
+   pydantic-evals for Logfire/local), each unit-tested **offline against fake SDK modules** (no
+   vendor install in `.venv`), with `scorers/judges.py` becoming wrappers over them and the
+   capability matrix listing which preset has native judges. Every adapter imports its SDK lazily
+   and translates `ImportError` into a `CapabilityError` hint (CONTRACT §3.0/§7.4). Resolved-model
+   recording per verdict is 3b.5 — say so in the packet so the worker does not widen. Dispatch
+   `evalops-worker` (`deepseek/deepseek-flash`, cwd = the repo), then review with
+   `codex-luna-reviewer` (`openai-codex/gpt-6-luna`, thinking `xhigh`).
 3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), fetch/rebase,
-   push, and confirm CI. Then WP3b.2 (native adapters per preset) → WP3b.3 (LiteLLM fallback) →
-   WP3b.4 (pairwise/panel) → WP3b.5 (pin enforcement + calibration as a gate input) → **G3b**
-   (tag `v0.5.0`). Phase 3 (vendor contract verification) comes after 3b and needs docker +
-   credentials — ask the maintainer before starting it.
+   push, and confirm CI. Then WP3b.3 (LiteLLM fallback) → WP3b.4 (pairwise/panel) →
+   WP3b.5 (pin enforcement + calibration as a gate input) → **G3b** (tag `v0.5.0`). Phase 3
+   (vendor contract verification) comes after 3b and needs docker + credentials — ask the
+   maintainer before starting it.
 
 Suggested opening message for the new thread (paste as the first user message):
 
 ```text
-Repo: /home/howt/work/evalops (github.com/minghao51/evalops, branch main, public).
-Role: you are the orchestrator. You do not write the code; you write the packet, dispatch it,
-review the result, and commit. Read, in this order: HANDOFF.md (§0 snapshot, §2 non-negotiables,
-§4 dispatch protocol + coordination, §6 WP3b.1 brief, §8 open decisions, §10), docs/CONTRACT.md
-§6 (the judge pin contract) and §1 (exit codes), docs/STATE.md, and the map's phase-3b row in
-docs/IMPLEMENTATION_MAP.md.
+Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.2
+brief, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6 judge
+pinning), docs/STATE.md, and the map's phase-3b row in docs/IMPLEMENTATION_MAP.md. We are in phase
+3b (judges, native-first): WP3b.1 (JudgeSpec) landed at 173a416 — phase 2 is closed at G2 (tag
+v0.4.0), 388 offline tests green (make check), CI green on py3.10/3.11/3.12. A second agent session
+may work this repo — follow HANDOFF §4's coordination rules: git fetch + git log --oneline
+main..origin/main before dispatching anything, fetch/rebase before every commit, never reimplement
+a WP that already landed (branch a duplicate as wp<N>-alternative-<sha>, cross-check, fix narrow
+gaps only), stay in disjoint trees, and serialize the phase-3b WPs because they touch the same
+files.
 
-State: phases 1 and 2 are closed (G1; G2 at tag v0.4.0), 359 offline tests green (make check),
-CI green on py3.10/3.11/3.12. Phase 2 shipped: evalops pipeline (declarative stage table,
---dry-run), release re-verification + fork-PR bot branch + nightly loud failure, 7 presets +
-generated capability matrix, four CI adapters generated from one template, calibration
-enforcement in pr/main with the failing check named in the stage error.
+Start WP3b.2: the four native judge adapters (MLflow make_judge, Langfuse managed evaluators with
+server-side execution + score read-back, openevals for LangSmith, pydantic-evals for
+Logfire/local), scorers/judges.py becomes wrappers, and the capability matrix lists which preset
+has native judges. Every adapter is unit-tested OFFLINE against fake SDK modules — no vendor SDK
+may be installed into .venv (the doctor pins assert vendor presets stay unreachable there). Lazy
+imports only; ImportError translates to a CapabilityError hint naming the pip extra (CONTRACT
+§3.0/§7.4). Resolved-model recording per verdict and gate-time pin enforcement are WP3b.5 — the
+packet must say so explicitly so the worker does not widen.
 
-Task: phase 3b (judges, native-first, D6), starting with WP3b.1 = JudgeSpec in core. Write
-docs/packets/WP3b.1.md in the shape of docs/packets/WP2.5.md (newest template): goal, fixed
-design decisions, falsifiable done-when (H1..Hn), allowed/forbidden paths, commands, report
-format, and the reviewer prompt. Scope of 3b.1: a JudgeSpec (name, rubric, scale, model pin,
-prompt_version, sampling) validated at load with no SDK import; an unpinned or alias/default
-judges.<name>.model rejected at load with exit 2; judge_meta() may add metadata but never
-override the pin. Gate-time enforcement (exit 1) and resolved-model-per-verdict recording are
-WP3b.5 — say so in the packet so the worker does not widen. Then dispatch to evalops-worker
-(deepseek/deepseek-flash, cwd = the repo), review with evalops-reviewer (zai/glm-5.3-flash,
-thinking high; if zai's quota is exhausted, run the same review on the user-scope substitute
-agent evalops-reviewer-alt = opencode-go/glm-5.3 and say so in the commit body), fix on BLOCK,
-and commit only on PASS as a feature commit + a separate docs commit.
+Protocol: write docs/packets/WP3b.2.md in the shape of docs/packets/WP3b.1.md (goal, fixed design
+decisions, falsifiable done-when, allowed/forbidden paths, commands, report format, reviewer
+prompt); dispatch it to evalops-worker (deepseek/deepseek-flash, cwd =
+/home/howt/work/evalops_universal/evalops); review the uncommitted tree with codex-luna-reviewer
+(openai-codex/gpt-6-luna, thinking xhigh; fallbacks: evalops-reviewer zai/glm-5.3-flash high, or
+evalops-reviewer-alt opencode-go/glm-5.3 — say which you used); loop on BLOCK; commit only after
+PASS as a feature commit + a separate docs commit; fetch/rebase before every commit; push and
+confirm with gh run list.
 
-Coordination (a second session may work this repo): git fetch + git log --oneline
-main..origin/main before dispatching anything; fetch/rebase before every commit; if a WP or the
-G2 tag already landed, do not re-do it — cross-check it instead (branch your duplicate as
-crosscheck/<wp>-mine, diff, report real defects); stay in disjoint trees, and serialize the
-phase-3b WPs because they touch the same files. Never fabricate hashes, numbers, or evidence;
-undefined contract semantics are blockers — ask the maintainer. Gates: make check, standalone
-runner (tests/run_without_pytest.py), make contract (skips offline), make schema zero drift,
-make capabilities / make ci-adapters zero drift, goldens untouched. Commit style: separate
-feature and docs commits, WP id + review rounds in the body, push as you go over SSH, confirm
-with gh run list --limit 1.
-
-After WP3b.1: 3b.2 native adapters per preset → 3b.3 LiteLLM fallback → 3b.4 pairwise/panel →
-3b.5 pin enforcement + resolved model + calibration as a gate input → G3b (tag v0.5.0). Phase 3
-(vendor contract verification) needs docker + LangSmith/Logfire/Databricks credentials — ask the
-maintainer before starting it. Also pending maintainer confirmation: the WP2.4 fork-PR posture
-(fork PRs now run with the workflow's permissions, id-token: write) and the missing
-`evalops ci-adapters` envelope golden — see HANDOFF §8.
+Gates before every commit: make check, .venv/bin/python tests/run_without_pytest.py, make contract
+(skips offline), make schema zero drift, make capabilities and make ci-adapters zero diff, no
+unexpected golden churn. Never fabricate hashes, numbers, or evidence; undefined contract
+semantics are blockers — ask the maintainer. After WP3b.2: 3b.3 LiteLLM rubric fallback → 3b.4
+pairwise/panel → 3b.5 pin enforcement + resolved model per verdict + nightly server-side settings
+check + calibration as a gate input → G3b tags v0.5.0. Phase 3 (vendor contract verification)
+needs docker + LangSmith/Logfire/Databricks credentials — ask the maintainer before starting it.
+Also pending maintainer confirmation (HANDOFF §8): the WP2.4 fork-PR posture and the missing
+`evalops ci-adapters` envelope golden.
 ```
