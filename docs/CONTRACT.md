@@ -538,6 +538,16 @@ rule is binding on new code but only enforced where a test exists.
   spec (thresholds and/or `model` only) is unchanged by WP3b.1: **validating the pin for every
   judge, and refusing a `judge_meta()` that disagrees with the config pin, remain WP3b.5.**
   `unpinned` is therefore not an exhaustive list of unvalidated judges.
+- **Native judge adapters exist per evaluator (WP3b.2).** `scorers/native.py` declares exactly one
+  adapter per evaluator backend (MLflow `make_judge` for `mlflow`, managed evaluators with
+  server-side execution + score read-back for `langfuse`, openevals for `langsmith`, pydantic-evals
+  for `core`; `databricks` rides on `mlflow`). Every adapter imports its SDK lazily inside a
+  function body and a missing SDK is `CapabilityError` → **exit 6** naming the pip package, as is
+  asking an evaluator with no adapter (CONTRACT §3.0/§7.4); results normalize through `to_float`
+  and a missing vendor score is `None`, never `0.0`. The vendor call shapes are `VERIFY`-marked
+  and resolved in phase 3. Nothing wires a declared spec into `plan`/`evaluate`/`calibrate` yet —
+  auto-selection (native where available, the LiteLLM rubric fallback where declared) is **WP3b.3**;
+  resolved-model recording per verdict and gate-time pin enforcement remain **WP3b.5**.
 
 ## 7. Third-party plugin requirements
 

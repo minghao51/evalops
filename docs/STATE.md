@@ -5,10 +5,11 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 ## Where we are
 
 - **Phase:** **phase 3b in progress** (judges, native-first) — WP3b.1 (`JudgeSpec`: a declared
-  judge spec is representable and an unpinned one cannot load) done. Phases 1 and 2 are closed
-  (**G1**, **G2** at `v0.4.0`); next is WP3b.2 (native adapters per preset), then 3b.3–3b.5 and
-  **G3b** (`v0.5.0`).
-- **Verified base:** `173a416` (WP3b.1) — **tests:** 388 green (`make check`), standalone 388/388.
+  judge spec is representable and an unpinned one cannot load) and WP3b.2 (native judge adapters:
+  one per evaluator, offline fake-SDK tests, `scorers/judges.py` wrapper) are done. Phases 1 and 2
+  are closed (**G1**, **G2** at `v0.4.0`); next is WP3b.3 (LiteLLM rubric fallback), then 3b.4–3b.5
+  and **G3b** (`v0.5.0`).
+- **Verified base:** `c2beda5` (WP3b.2) — **tests:** 400 green (`make check`), standalone 400/400.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
   `main` (last completed runs: `40109899232` WP3b.1 feature; phase-2 close at `40103336121`).
 - **Repo:** https://github.com/minghao51/evalops (public).
@@ -23,11 +24,11 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   (`tests/unit/test_calibration_enforcement.py`, four mutations red); `make check` 359, standalone
   359/359, `make contract` 1 skipped offline, `make schema` / `make ci-adapters` zero drift, goldens
   untouched. CI `40102918591` (WP2.5) + `40103336121` (docs) green on py3.10/3.11/3.12.
-- **Next:** WP3b.2 (native judge adapters: MLflow `make_judge`, Langfuse managed evaluators,
-  openevals for LangSmith, pydantic-evals for Logfire/local — `scorers/judges.py` becomes
-  wrappers), then 3b.3 (LiteLLM rubric fallback), 3b.4 (pairwise/panel), 3b.5 (gate enforcement,
-  resolved model per verdict, nightly settings check, calibration as gate input) and **G3b**.
-  Packet shape for a new WP: `docs/packets/WP3b.1.md` (newest). Contract suite: `make contract`
+- **Next:** WP3b.3 (LiteLLM rubric fallback + strict parsing + per-call cost — this also wires a
+  declared `JudgeSpec` to its native adapter from WP3b.2 or to the fallback, so every spec resolves
+  to a real scorer), then 3b.4 (pairwise/panel), 3b.5 (gate enforcement, resolved model per
+  verdict, nightly settings check, calibration as gate input) and **G3b**.
+  Packet shape for a new WP: `docs/packets/WP3b.2.md` (newest). Contract suite: `make contract`
   with `evalops[sql]` installed.
 
 ## Work packages
@@ -52,6 +53,7 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 | 2.4 CI adapters generated from one template (`ci_adapters.py`, `evalops ci-adapters`, `make ci-adapters`, `ci/Jenkinsfile`) | done | `26d292c` (1 BLOCK: 6 defects + narrow re-review PASS) |
 | 2.5 calibration enforcement (real `pr`/`main` pins, failing checks named in the stage error) | done | `4e00b29` (1 review round: PASS, 0 defects) |
 | 3b.1 `JudgeSpec` (rubric/scale/pin/prompt_version/sampling; unpinned declared spec = exit 2 at load; `evalops judges`) | done | `173a416` (2 BLOCK rounds: 7 defects + 1 adjudication + narrow PASS) |
+| 3b.2 native judge adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals; `scorers/native.py` registry + `spec_judge` wrapper; native-judges capability section) | done | `c2beda5` (1 review round: PASS, 0 defects) |
 | **G1** phase-1 exit gate | **closed** | 2026-10-24: 283 tests, standalone 283/283, Postgres contract 1 passed, schema/goldens clean; CI `40078618397` |
 
 ## Known compromises (tracked, not forgotten)

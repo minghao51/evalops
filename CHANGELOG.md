@@ -9,6 +9,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP3b.2 native judge adapters (2026-10-24):** one native judge adapter per evaluator backend,
+  offline-tested against fake SDK modules — MLflow `make_judge`, Langfuse managed evaluators
+  (server-side execution + score read-back, deterministic config key of judge name + `rubric_hash`
+  + prompt_version), openevals for LangSmith, pydantic-evals for the core evaluator (`databricks`
+  rides on `mlflow`; `local`/`logfire`/`mixed` on `core`). `scorers/native.py` holds the four-entry
+  `ADAPTERS` registry; every SDK import is function-local (the guard-exempt lazy pattern) and an
+  `ImportError` becomes `CapabilityError` → exit 6 naming the pip package (CONTRACT §3.0/§7.4), as
+  is asking an evaluator that has no adapter. Each factory returns a `call_scorer`-compatible
+  neutral scorer (name = `spec.name`, `llm=True`) that normalizes through `to_float` and turns a
+  missing vendor score into `None`, never `0.0`. `scorers/judges.py` gains `spec_judge` as the
+  wrapper over the registry; `span_judge`/`trajectory_judge` are unchanged and nothing wires a
+  declared spec into `plan`/`evaluate`/`calibrate` yet (auto-selection is WP3b.3, where the
+  LiteLLM fallback completes the story; resolved-model recording + enforcement are WP3b.5). The
+  capability matrix gains a generated native-judges section (payload key + docs table, presets
+  derived from `PRESETS`); vendor kwarg/route details are `VERIFY`-marked like the plugins (phase
+  3 resolves them). 388 → 400 tests. Review: 1 round PASS, 0 defects.
 - **WP3b.1 `JudgeSpec` (2026-10-24):** a judge is now a core, vendor-free value object — rubric,
   scale (binary/ordinal/continuous), pinned `model`, `prompt_version` and sampling — in frozen
   dataclasses, validated at load. A `judges.<name>` rule declares a spec exactly when it carries
