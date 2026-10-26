@@ -2,6 +2,7 @@
 and use LLM judges (evalops.scorers.judges) only where a deterministic check cannot decide."""
 
 from .judges import spec_judge, span_judge, trajectory_judge  # noqa: F401
+from .panel import normalize_pairwise, panel_judge, pairwise_judge  # noqa: F401
 from .trajectory import (  # noqa: F401
     agent_route,
     expected_state,
