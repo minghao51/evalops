@@ -548,6 +548,21 @@ rule is binding on new code but only enforced where a test exists.
   and resolved in phase 3. Nothing wires a declared spec into `plan`/`evaluate`/`calibrate` yet —
   auto-selection (native where available, the LiteLLM rubric fallback where declared) is **WP3b.3**;
   resolved-model recording per verdict and gate-time pin enforcement remain **WP3b.5**.
+- **A declared spec resolves to a real scorer (WP3b.3).** `judges.<name>.judge` selects the
+  executor: absent/`native` uses the evaluator's native adapter, `litellm` the evalops rubric
+  fallback (`scorers/litellm_judge.py`, the only LiteLLM surface); the key is a closed set
+  (exit 2 at the dotted key in both validation layers) and never declares a spec by itself. The
+  fallback passes the full spec to `litellm.completion` (pinned model, sampling, JSON mode) and
+  parses strictly: `NaN`/`Infinity`/unrepresentable/non-number scores are judge-named exit-5
+  errors — never `0.0`, never `None` — and out-of-range scores clamp to the declared scale.
+  Error evidence is rubric-checked, so neither an echoing model nor a provider exception can leak
+  rubric text into `r.error`. Token usage is reported per judge call (`report_usage`); the core
+  evaluator opens its per-row usage collector around scoring as well as prediction and merges
+  reported usage additively (app-reported usage keeps precedence over the tracer backfill).
+  `plan`/`evaluate` count one client-side call per row per declared spec in the estimate
+  (`server_side` executors do not bump); a name collision between an app-provided scorer and a
+  declared spec is exit 2 before any ledger row. Spec validity remains exit 2 at `judges.load`
+  before any estimate; executor SDK availability is exit 6 at scorer build, before reservation.
 
 ## 7. Third-party plugin requirements
 

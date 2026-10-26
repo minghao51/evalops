@@ -1,24 +1,24 @@
-# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b in progress (WP3b.1 + 3b.2 done; 3b.3 next)
+# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b in progress (WP3b.1–3b.3 done; 3b.4 next)
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **400 offline + 1 Postgres contract test, deselected**).
+(tests: **433 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
 `docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and the next
-work is **phase 3b** (judges, native-first): WP3b.1 `JudgeSpec` and WP3b.2 (native adapters)
-landed, WP3b.3 (LiteLLM rubric fallback) is next. The completed `docs/packets/WP3b.2.md` /
-`WP3b.1.md` are the newest packet templates.
+work is **phase 3b** (judges, native-first): WP3b.1 `JudgeSpec`, WP3b.2 (native adapters) and
+WP3b.3 (LiteLLM fallback + wiring) landed, WP3b.4 (pairwise/panel) is next. The completed
+`docs/packets/WP3b.3.md` / `WP3b.2.md` are the newest packet templates.
 
 ## 0. Current snapshot (start here)
 
 | | |
 |---|---|
-| Verified base | `c2beda5` (WP3b.2) — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
-| Tests | 400 offline (`make check`), standalone 400/400, 1 Postgres contract test (excluded) |
+| Verified base | `f8668fe` (WP3b.3) — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
+| Tests | 433 offline (`make check`), standalone 433/433, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
 | Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
-| Phase 3b | **WP3b.1 done** (`173a416`: `JudgeSpec`, load-time pin validation, `evalops judges`); **WP3b.2 done** (`c2beda5`: one native judge adapter per evaluator, fake-SDK offline tests, `spec_judge` wrapper, native-judges capability section); **WP3b.3 next** |
+| Phase 3b | **WP3b.1 done** (`173a416`: `JudgeSpec`); **WP3b.2 done** (`c2beda5`: native adapters); **WP3b.3 done** (`f8668fe`: LiteLLM fallback + strict parsing + per-call cost + spec→scorer wiring); **WP3b.4 next** |
 | Tree | clean; no uncommitted work |
-| Next artifact | `docs/packets/WP3b.3.md` (copy `docs/packets/WP3b.2.md`, the newest template) |
+| Next artifact | `docs/packets/WP3b.4.md` (copy `docs/packets/WP3b.3.md`, the newest template) |
 | Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; needs LiteLLM optional dep + fake SDK fixtures (offline) |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
@@ -41,9 +41,9 @@ reproducibility (cassettes). **Wrap and normalize, never rebuild.**
   (WP1.1), gate statistics + row identity (WP1.3), ledger integrity (WP1.2), test debt (WP1.4) and
   trace model v2 (WP1.5). Phase 2 is closed at G2 (`v0.4.0`): `evalops pipeline` (WP2.1), release
   re-verification (2.2), presets + capability matrix (2.3), the four generated CI adapters (2.4) and
-  calibration enforcement (2.5). Phase 3b (judges, native-first) is underway: `JudgeSpec` (3b.1)
-  and the native judge adapters (3b.2) are in; the LiteLLM fallback (3b.3), pairwise/panel (3b.4)
-  and pin enforcement (3b.5) remain before **G3b** tags `v0.5.0`.
+  calibration enforcement (2.5). Phase 3b (judges, native-first) is underway: `JudgeSpec` (3b.1),
+  the native judge adapters (3b.2) and the LiteLLM fallback + spec→scorer wiring (3b.3) are in;
+  pairwise/panel (3b.4) and pin enforcement (3b.5) remain before **G3b** tags `v0.5.0`.
 
 ## 2. Non-negotiables (read before editing anything)
 
@@ -450,6 +450,37 @@ the LiteLLM fallback (3b.3) so every spec resolves; resolved-model recording + e
 deviations — pyright-ignore comments on the four lazy imports, and VERIFY-marked pass-through of
 `prompt_version`/sampling kwargs the vendors do not document — were reviewed and accepted).
 
+### WP3b.3 — LiteLLM rubric fallback + spec→scorer wiring (DONE, `f8668fe`)
+
+A declared `JudgeSpec` now resolves to a real scorer. `judges.<name>.judge` selects the executor —
+absent/`native` uses the evaluator's WP3b.2 native adapter, `litellm` the evalops rubric fallback
+(`scorers/litellm_judge.py`); the key is a closed set validated at both layers (config model at the
+exact key, `JudgeSpec.validate()` at the dotted path, both exit 2) and never declares a spec by
+itself, so threshold-only rules are byte-identical. The fallback passes the full spec to
+`litellm.completion` (pinned model, sampling, JSON mode) behind a function-local import; a missing
+SDK is `CapabilityError` exit 6 naming `pip install litellm`. Parsing is strict:
+`NaN`/`Infinity` (non-standard JSON constants), unrepresentable numeric literals and non-number
+scores are judge-named exit-5 errors — never `0.0`, never `None` — and out-of-range scores clamp to
+the declared scale. Error evidence is rubric-checked: an echoing model or a provider exception
+cannot leak rubric text into `r.error`. Token usage is reported per call (`report_usage`), and the
+core evaluator now opens its per-row usage collector around **scoring** too (it wrapped only
+`predict` before, so scorer-reported tokens never reached `row.usage`) and merges additively with
+app-reported usage keeping precedence over the tracer backfill; projects without declared specs are
+byte-identical (the eval golden still pins 210/50). `plan`/`evaluate` count one client-side call
+per row per declared spec in the estimate (`NativeJudge.server_side`: only `langfuse-managed` is
+`True`); a name collision between an app scorer and a declared spec is exit 2 before any ledger
+row; `calibrate` now yields real agreement/kappa/MAE pairs for declared specs. First `pyproject`
+change since phase 2: the `litellm` extra (no preset/plugin references it; doctor pins untouched).
+Gate-time pin enforcement, resolved-model recording and the nightly settings check remain 3b.5;
+pairwise/panel is 3b.4. 33 new tests (400 → 433). Review: 1 BLOCK round — 3 defects (`NaN`
+escaping the strict parser via `json.loads`' default constants; rubric echo reaching error
+evidence; a docstring leaking into the generated schema diff) — then a narrow fix and a narrow
+re-review that reproduced all three fixes' mutations red. The re-review's remaining item (the
+untracked packet file in the tree) was adjudicated: the packet is the orchestrator-owned dispatch
+artifact and lands in the docs commit (WP3b.1/WP3b.2 convention). The H5 blocker mid-WP (scorer
+usage unreachable within the original paths) was adjudicated by extending the allowed paths to the
+narrow core.py scoring-collector change.
+
 After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) → 3b.4 (pairwise/panel) →
 3b.5 (pin enforcement + resolved model + calendar/settings check + calibration as gate input) →
 **G3b** tags `v0.5.0` (needs the LiteLLM optional dep and fake SDK fixtures; stays offline).
@@ -530,12 +561,12 @@ ci/                      pipeline.sh (shim → `evalops pipeline`) + the four ge
 ## 10. First commands in the new thread
 
 ```bash
-cd /home/howt/work/evalops_universal/evalops && make check      # expect 400 passed, 1 deselected
+cd /home/howt/work/evalops_universal/evalops && make check      # expect 433 passed, 1 deselected
 git fetch origin && git log --oneline main..origin/main     # is the other session ahead? which WP?
 gh run list --limit 1                                       # confirm CI green on main
 git tag -l v0.4.0                                          # phase 2 close marker
 sed -n '/### Phase 3b/,/### Phase 3 —/p' docs/IMPLEMENTATION_MAP.md
-sed -n '/### WP3b.3/,/^## 7/p' HANDOFF.md                  # the pickup brief
+sed -n '/### WP3b.4/,/^## 7/p' HANDOFF.md                  # the pickup brief
 ```
 
 Then:
@@ -543,50 +574,46 @@ Then:
 1. **Check §4's coordination rules first.** `git fetch` + `git log --oneline main..origin/main`:
    if the other session has already landed a phase-3b WP, cross-check its commit against the map's
    phase-3b row before doing anything else (disjoint trees or take the next WP).
-2. **Write the WP3b.3 packet** (`docs/packets/WP3b.3.md`, copying `docs/packets/WP3b.2.md`'s shape)
-   from the map's phase-3b row: the LiteLLM rubric fallback + strict parsing (JSON mode, scale
-   clamp) + per-call cost — parse failures are errors, never silent 0.0, and cost is attributed per
-   judge call. WP3b.3 is also where a declared `JudgeSpec` finally resolves to a real scorer:
-   native adapter (WP3b.2's registry) when the evaluator has one, LiteLLM where declared or where
-   no native adapter exists — `plan`/`evaluate`/`calibrate` gain the wiring there. This is the
-   first `pyproject.toml` change since phase 2 (the LiteLLM optional dep): keep
-   `PLUGIN_EXTRAS`/doctor pins honest and regenerate `docs/CAPABILITIES.md`. Resolved-model
-   recording per verdict and gate-time pin enforcement are 3b.5 — say so in the packet so the
-   worker does not widen. Dispatch `evalops-worker` (`deepseek/deepseek-flash`, cwd = the repo),
-   then review with `codex-luna-reviewer` (`openai-codex/gpt-6-luna`, thinking `xhigh`).
+2. **Write the WP3b.4 packet** (`docs/packets/WP3b.4.md`, copying `docs/packets/WP3b.3.md`'s shape)
+   from the map's phase-3b row: pairwise (position swap) + panel (mean/majority/agreement)
+   wrappers over whichever judge is in use — the swap-invariance pin (A vs B and B vs A agree
+   after normalization) and panel disagreement reported. These are wrappers around `spec_judge`/
+   the neutral scorer protocol (3b.3's surface) — keep them vendor-free, offline-tested, and
+   config-declarable only if the map row says so (check first; if the config surface is ambiguous,
+   fix the minimal shape in the packet and say why). Resolved-model recording and gate-time pin
+   enforcement are 3b.5 — say so in the packet so the worker does not widen. Dispatch
+   `evalops-worker` (`deepseek/deepseek-flash`, cwd = the repo), then review with
+   `codex-luna-reviewer` (`openai-codex/gpt-6-luna`, thinking `xhigh`).
 3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), fetch/rebase,
-   push, and confirm CI. Then WP3b.4 (pairwise/panel) →
-   WP3b.5 (pin enforcement + calibration as a gate input) → **G3b** (tag `v0.5.0`). Phase 3
+   push, and confirm CI. Then WP3b.5 (pin enforcement + resolved model per verdict + nightly
+   server-side settings check + calibration as a gate input) → **G3b** (tag `v0.5.0`). Phase 3
    (vendor contract verification) comes after 3b and needs docker + credentials — ask the
    maintainer before starting it.
 
 Suggested opening message for the new thread (paste as the first user message):
 
 ```text
-Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.3
+Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.4
 brief, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6 judge
 pinning), docs/STATE.md, and the map's phase-3b row in docs/IMPLEMENTATION_MAP.md. We are in phase
-3b (judges, native-first): WP3b.1 (JudgeSpec) landed at 173a416 and WP3b.2 (native judge adapters:
-one per evaluator in scorers/native.py, fake-SDK offline tests, spec_judge wrapper, native-judges
-capability section) landed at c2beda5 — phase 2 is closed at G2 (tag v0.4.0), 400 offline tests
-green (make check), CI green on py3.10/3.11/3.12. A second agent session may work this repo —
-follow HANDOFF §4's coordination rules: git fetch + git log --oneline main..origin/main before
-dispatching anything, fetch/rebase before every commit, never reimplement a WP that already landed
+3b (judges, native-first): WP3b.1 (JudgeSpec) landed at 173a416, WP3b.2 (native judge adapters,
+scorers/native.py registry) at c2beda5, and WP3b.3 (LiteLLM rubric fallback + strict parsing +
+per-call cost + spec→scorer wiring via judges.<name>.judge) at f8668fe — phase 2 is closed at G2
+(tag v0.4.0), 433 offline tests green (make check), CI green on py3.10/3.11/3.12. A second agent
+session may work this repo — follow HANDOFF §4's coordination rules: git fetch + git log --oneline
+main..origin/main before dispatching anything, fetch/rebase before every commit, never reimplement
+a WP that already landed
 (branch a duplicate as wp<N>-alternative-<sha>, cross-check, fix narrow gaps only), stay in
 disjoint trees, and serialize the phase-3b WPs because they touch the same files.
 
-Start WP3b.3: the LiteLLM rubric fallback + strict parsing (JSON mode, scale clamp) + per-call
-cost — parse failures are errors, never silent 0.0, and cost is attributed per judge call. WP3b.3
-is also where a declared JudgeSpec finally resolves to a real scorer: the native adapter
-(WP3b.2's registry) when the evaluator has one, LiteLLM where declared or where no native adapter
-exists — plan/evaluate/calibrate gain the wiring there. The tested-offline rule still applies: no
-vendor SDK installed into .venv (fake litellm module for the fallback tests; the doctor pins stay
-untouched). This is the first pyproject.toml change since phase 2 (the LiteLLM optional dep): keep
-PLUGIN_EXTRAS/doctor pins honest and regenerate docs/CAPABILITIES.md. Resolved-model recording
-per verdict and gate-time pin enforcement are WP3b.5 — the packet must say so explicitly so the
-worker does not widen.
+Start WP3b.4: pairwise (position swap) + panel (mean/majority/agreement) wrappers over whichever
+judge is in use. The pins from the map row: swap-invariance — A vs B and B vs A agree after
+normalization — and panel disagreement reported, never hidden. The wrappers compose over WP3b.3's
+surface (spec_judge / the neutral scorer protocol) and stay vendor-free and offline-tested (fake
+SDKs only, no vendor install into .venv). Resolved-model recording and gate-time pin enforcement
+are WP3b.5 — the packet must say so explicitly so the worker does not widen.
 
-Protocol: write docs/packets/WP3b.3.md in the shape of docs/packets/WP3b.2.md (goal, fixed design
+Protocol: write docs/packets/WP3b.4.md in the shape of docs/packets/WP3b.3.md (goal, fixed design
 decisions, falsifiable done-when, allowed/forbidden paths, commands, report format, reviewer
 prompt); dispatch it to evalops-worker (deepseek/deepseek-flash, cwd =
 /home/howt/work/evalops_universal/evalops); review the uncommitted tree with codex-luna-reviewer
@@ -598,10 +625,9 @@ confirm with gh run list.
 Gates before every commit: make check, .venv/bin/python tests/run_without_pytest.py, make contract
 (skips offline), make schema zero drift, make capabilities and make ci-adapters zero diff, no
 unexpected golden churn. Never fabricate hashes, numbers, or evidence; undefined contract
-semantics are blockers — ask the maintainer. After WP3b.3: 3b.4 pairwise/panel → 3b.5 pin
-enforcement + resolved model per verdict + nightly server-side settings check + calibration as a
-gate input → G3b tags v0.5.0. Phase 3 (vendor contract verification) needs docker +
-LangSmith/Logfire/Databricks credentials — ask the maintainer before starting it. Also pending
-maintainer confirmation (HANDOFF §8): the WP2.4 fork-PR posture and the missing `evalops
-ci-adapters` envelope golden.
+semantics are blockers — ask the maintainer. After WP3b.4: 3b.5 pin enforcement + resolved model
+per verdict + nightly server-side settings check + calibration as a gate input → G3b tags v0.5.0.
+Phase 3 (vendor contract verification) needs docker + LangSmith/Logfire/Databricks credentials —
+ask the maintainer before starting it. Also pending maintainer confirmation (HANDOFF §8): the
+WP2.4 fork-PR posture and the missing `evalops ci-adapters` envelope golden.
 ```

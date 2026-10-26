@@ -9,6 +9,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP3b.3 LiteLLM rubric fallback + spec→scorer wiring (2026-10-24):** a declared `JudgeSpec` now
+  resolves to a real scorer. `judges.<name>.judge` selects the executor — absent/`native` uses the
+  evaluator's WP3b.2 native adapter, `litellm` the evalops rubric fallback; the key is a closed set
+  validated at both layers (config model at the exact key, `JudgeSpec.validate()` at the dotted
+  path) and never declares a spec by itself, so threshold-only rules are byte-identical. The
+  fallback (`scorers/litellm_judge.py`) calls `litellm.completion` with the full spec (pinned
+  model, sampling, JSON mode) behind a function-local import; a missing SDK is `CapabilityError` →
+  exit 6 naming `pip install litellm`. Parsing is strict: `NaN`/`Infinity` (non-standard JSON
+  constants), unrepresentable numeric literals and non-number scores are judge-named exit-5
+  errors — never `0.0`, never `None` — and out-of-range scores clamp to the declared scale. Error
+  evidence is rubric-checked (an echoing model or a provider exception cannot leak rubric text into
+  `r.error`), and token usage is reported per call via `report_usage`; the core evaluator now opens
+  its per-row usage collector around **scoring** too (it wrapped only `predict` before, so
+  scorer-reported tokens never reached `row.usage`) and merges additively with app-reported usage
+  keeping precedence over the tracer backfill. `plan`/`evaluate` count one client-side call per row
+  per declared spec (`langfuse-managed` is `server_side` and does not bump), and `calibrate` now
+  yields real agreement/kappa/MAE pairs for declared specs. First `pyproject.toml` change since
+  phase 2: the `litellm` extra. Gate-time pin enforcement, resolved-model recording and the
+  nightly settings check remain WP3b.5; pairwise/panel is WP3b.4. 400 → 433 tests. Review: 1 BLOCK
+  round (3 defects: `NaN` escaping the strict parser, rubric echo in error evidence, docstring
+  leaking into the schema diff) + narrow fix + narrow re-review PASS (one adjudication: the
+  untracked packet file is the orchestrator-owned dispatch artifact).
 - **WP3b.2 native judge adapters (2026-10-24):** one native judge adapter per evaluator backend,
   offline-tested against fake SDK modules — MLflow `make_judge`, Langfuse managed evaluators
   (server-side execution + score read-back, deterministic config key of judge name + `rubric_hash`
