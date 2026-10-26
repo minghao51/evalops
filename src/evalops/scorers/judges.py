@@ -2,9 +2,10 @@
 your judge model and returns a score (float/bool/'yes'/'no'/dict). Pin its model + prompt version in
 judge_meta and calibrate it with `evalops calibrate` before trusting it in gates.
 
-Two kinds of wrapper live here (WP3b.2): `span_judge`/`trajectory_judge` wrap a judge *callable* you
-supply, and `spec_judge` wraps an *adapter* -- the native judge of the configured evaluator backend
-(:mod:`evalops.scorers.native`) -- from a declared `JudgeSpec`.
+Two kinds of wrapper live here (WP3b.2/WP3b.3): `span_judge`/`trajectory_judge` wrap a judge
+*callable* you supply, and `spec_judge` wraps the executor a declared `JudgeSpec` selects -- the
+native judge of the configured evaluator backend (:mod:`evalops.scorers.native`) or the evalops
+rubric fallback over LiteLLM (:mod:`evalops.scorers.litellm_judge`).
 """
 
 from __future__ import annotations
@@ -13,20 +14,30 @@ from collections.abc import Callable
 
 from ..judges import JudgeSpec
 from ..scoring import scorer, to_float
+from .litellm_judge import litellm_judge
 from .native import native_judge
 
 
 def spec_judge(spec: JudgeSpec, *, evaluator: str) -> Callable[..., float | None]:
-    """The evaluator's native judge for one declared spec, as a neutral scorer.
+    """The scorer for one declared spec, chosen by its executor (``spec.judge``).
+
+    ``native`` (the default, and what an absent ``judges.<name>.judge`` key means) uses the
+    evaluator's own judge from :mod:`evalops.scorers.native`; ``litellm`` uses the evalops rubric
+    fallback, which is evaluator-independent and therefore ignores `evaluator`. This is the single
+    entry point: `judges.load` has already validated the value against the closed set, so an
+    unknown executor cannot reach here from a config (a direct API caller gets the same rejection
+    from `JudgeSpec.validate`).
 
     `evaluator` is the **plugin name** serving the `evaluator` role (`mlflow`, `langfuse`,
-    `langsmith`, `core`); the adapter table lives in `scorers.native`. An evaluator without an
-    adapter, or one whose SDK is not installed, raises `CapabilityError` -> exit 6 with a hint (the
-    full spec reaches the vendor call: rubric, pinned model, prompt version, sampling).
+    `langsmith`, `core`). An evaluator without an adapter, or one whose SDK is not installed, raises
+    `CapabilityError` -> exit 6 with a hint (the full spec reaches the vendor call: rubric, pinned
+    model, prompt version, sampling); a missing `litellm` is the same exit 6 with
+    `pip install litellm`.
 
-    Choosing this wrapper from `evalops.yaml` automatically is WP3b.3; recording the resolved model
-    per verdict is WP3b.5 -- today you call it explicitly.
+    Recording the resolved model per verdict is WP3b.5.
     """
+    if spec.judge == "litellm":
+        return litellm_judge(spec)
     return native_judge(spec, evaluator=evaluator)
 
 

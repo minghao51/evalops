@@ -49,9 +49,10 @@ repo's gates -- ruff, mypy with ``ignore_missing_imports``, and the AST guard --
 and the guard exists to keep exactly this shape (a *function-local* import) rather than a
 module-level one.
 
-Deliberately **not** wired in: choosing a scorer from a declared spec is WP3b.3, and recording a
-resolved model per verdict is WP3b.5. Nothing here is reachable from ``plan``/``evaluate``/
-``calibrate`` today.
+Deliberately **not** wired in here: choosing a scorer from a declared spec lives in
+:mod:`evalops.scorers.judges` (``spec_judge`` dispatches on ``JudgeSpec.judge``, WP3b.3), and
+recording a resolved model per verdict is WP3b.5. Nothing in this module is reachable from
+``plan``/``evaluate``/``calibrate`` except through that dispatch.
 """
 
 from __future__ import annotations
@@ -78,6 +79,10 @@ class NativeJudge:
     name** the adapter serves, ``import_name`` is the SDK root the factory imports, ``package`` is
     the pip-install name the ``CapabilityError`` hint shows, and ``description`` is the one line the
     capability matrix renders.
+
+    ``server_side`` is the estimate's honesty bit (WP3b.3 D2): ``True`` when the vendor runs the
+    judge itself and the row costs no local model tokens (Langfuse managed evaluators), so
+    ``plan``/``_evaluate`` must not add a client-side judge call for it. It renders nowhere.
     """
 
     key: str
@@ -85,6 +90,7 @@ class NativeJudge:
     import_name: str
     package: str
     description: str
+    server_side: bool = False
 
 
 #: The registry, keyed by evaluator plugin name, in the packet's table order. Insertion order is
@@ -103,6 +109,9 @@ ADAPTERS: dict[str, NativeJudge] = {
         import_name="langfuse",
         package="langfuse",
         description="a Langfuse managed evaluator scores server-side; evalops reads the score back",
+        # The evaluator runs on Langfuse's side: the row costs no client-side model call, so the
+        # cost estimate must not add one (WP3b.3 D2).
+        server_side=True,
     ),
     "langsmith": NativeJudge(
         key="openevals",

@@ -359,6 +359,25 @@ def test_core_is_vendor_free():
     assert not violations, "vendor imports in core:\n" + "\n".join(str(v) for v in violations)
 
 
+def test_the_litellm_fallback_keeps_its_vendor_import_function_local():
+    """WP3b.3: the rubric fallback's ``litellm`` import must stay inside the factory body.
+
+    ``litellm`` is in :data:`VENDOR_ROOTS`, so hoisting `import litellm` to module level in
+    ``scorers/litellm_judge.py`` is a violation -- both here and in ``test_core_is_vendor_free``,
+    which is what makes the offline suite independent of the optional extra.
+    """
+    path = CORE_ROOT / "scorers" / "litellm_judge.py"
+    source = path.read_text(encoding="utf-8")
+    assert "import litellm" in source, f"{path} no longer imports litellm; update this probe"
+    violations = scan_source(source, "scorers/litellm_judge.py")
+    assert not violations, "the litellm import must stay function-local:\n" + "\n".join(str(v) for v in violations)
+    # ... and the same source with the import hoisted out of the function IS a violation, so the
+    # probe above cannot pass on a scanner that stopped seeing litellm
+    hoisted = source.split("def litellm_judge", 1)[0] + "\nimport litellm\n"
+    found = scan_source(hoisted, "scorers/litellm_judge.py")
+    assert found and found[0].module == "litellm", found
+
+
 def test_scanner_detects_planted_imports():
     cases = {
         "import mlflow\n": "mlflow",

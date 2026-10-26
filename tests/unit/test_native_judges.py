@@ -246,6 +246,18 @@ def test_the_adapter_registry_is_the_four_documented_rows():
         assert row.key and row.description and "\n" not in row.description and "|" not in row.description
 
 
+def test_server_side_is_set_only_for_the_langfuse_managed_adapter():
+    """WP3b.3 D2: the estimate's honesty bit, and it renders nowhere in the capability matrix."""
+    flags = {evaluator: row.server_side for evaluator, row in native.ADAPTERS.items()}
+    assert flags == {"core": False, "langfuse": True, "langsmith": False, "mlflow": False}, flags
+    # a new adapter defaults to client-side (the safe direction: it is counted, not silently free)
+    default = native.NativeJudge(key="k", evaluator="e", import_name="i", package="p", description="d")
+    assert default.server_side is False
+    # the flag is an estimate decision, not a capability claim: it is not part of any payload
+    assert "server_side" not in json.dumps(presets.capabilities_payload(), default=str)
+    assert "server_side" not in presets.capabilities_text()
+
+
 def test_adapters_hands_out_a_sorted_defensive_copy():
     copy = native.adapters()
     assert list(copy) == ["core", "langfuse", "langsmith", "mlflow"], "the matrix needs a sorted view"

@@ -1,7 +1,7 @@
 """WP3b.1: ``JudgeSpec`` in core -- a judge that cannot be represented unpinned.
 
 Falsifies, in order: (H1) a fully specified ``judges.<name>`` round-trips into a ``JudgeSpec`` and a
-CLI payload exposing exactly ``{name, model, prompt_version, scale, sampling, rubric_chars,
+CLI payload exposing exactly ``{name, model, prompt_version, scale, sampling, judge, rubric_chars,
 rubric_hash}``, where ``rubric_hash`` is the first 12 hex of sha256(rubric) and the rubric text never
 appears in ``payload()``/the envelope/human output; (H2) every invalid pin -- absent, empty,
 ``latest``, ``gpt-latest``, ``auto``, ``default``, ``project-default``, ``default/*``,
@@ -129,8 +129,19 @@ def test_payload_exposes_exactly_the_identity_fields_and_no_rubric_text():
     assert set(payload) == {"judges", "unpinned"}
     assert payload["unpinned"] == ["thresh"]
     entry = payload["judges"][0]
-    assert set(entry) == {"name", "model", "prompt_version", "scale", "sampling", "rubric_chars", "rubric_hash"}
+    assert set(entry) == {
+        "name",
+        "model",
+        "prompt_version",
+        "scale",
+        "sampling",
+        "judge",
+        "rubric_chars",
+        "rubric_hash",
+    }
     assert entry["name"] == "helpful" and entry["model"] == "gpt-4o-2024-11-20"
+    # WP3b.3 (additive): the executor is part of the identity surface
+    assert entry["judge"] == "native"
     assert entry["prompt_version"] == "3"
     assert entry["scale"] == {"max": 5.0, "min": 0.0, "kind": "ordinal"}
     assert entry["sampling"] == {"temperature": 0.2, "max_tokens": 256, "seed": 7}
@@ -305,6 +316,56 @@ def test_the_generated_schema_exposes_the_four_new_judge_keys():
 
 
 # ---------------------------------------------------------------------------
+# (H1, WP3b.3) the executor key: a closed set at both layers, and never a spec
+# ---------------------------------------------------------------------------
+def test_the_judge_executor_is_a_closed_set_at_both_layers():
+    """Absent and ``null`` mean ``native``; anything outside ``{native, litellm}`` is exit 2."""
+    assert judges_mod.JUDGE_EXECUTORS == ("native", "litellm")
+    assert judges_mod.JudgeSpec.from_rule("helpful", dict(FULL)).judge == "native"
+    assert judges_mod.JudgeSpec.from_rule("helpful", {**FULL, "judge": None}).judge == "native"
+    assert judges_mod.JudgeSpec.from_rule("helpful", {**FULL, "judge": "native"}).judge == "native"
+    assert judges_mod.JudgeSpec.from_rule("helpful", {**FULL, "judge": "litellm"}).judge == "litellm"
+
+    # layer 1: the config model, at the exact key (a typo, a wrong case, an int and an empty string)
+    for bad in ("openai", "LiteLLM", "", 1, True):
+        exc = _error(lambda bad=bad: _cfg({"helpful": {**FULL, "judge": bad}}))
+        assert exc.code == EXIT_USAGE == 2, (bad, exc.code)
+        assert _dotted(exc) == ["judges.helpful.judge"], (bad, _dotted(exc))
+
+    # layer 2: a direct API caller (no config model involved) names the same dotted path
+    direct = judges_mod.JudgeSpec(
+        name="helpful", rubric=RUBRIC, model="gpt-4o-2024-11-20", prompt_version="1", judge="openai"
+    )
+    exc = _error(direct.validate)
+    assert exc.code == EXIT_USAGE == 2 and _dotted(exc) == ["judges.helpful.judge"], _dotted(exc)
+    assert "litellm" in str(exc), "the rejection must name the closed set: " + str(exc)
+
+
+def test_the_judge_key_selects_an_executor_and_never_declares_a_spec():
+    """WP3b.1's discriminator is unchanged: ``judge`` alone is still a no-op key (A1)."""
+    assert "judge" not in judges_mod.SPEC_KEYS
+    assert "judge" in judges_mod.RULE_KEYS
+    rules = {
+        "correctness": dict(THRESHOLDS_ONLY),
+        "litellm_only": {"judge": "litellm"},
+        "native_only": {"judge": "native"},
+    }
+    cfg = _cfg(rules)
+    assert judges_mod.specs(cfg) == {name: None for name in sorted(rules)}
+    assert judges_mod.load(cfg) == {}
+    # `unpinned` is the threshold worklist, exactly as before: an executor choice does not join it
+    assert judges_mod.payload(cfg) == {"judges": [], "unpinned": ["correctness"]}
+
+
+def test_the_generated_schema_exposes_judge_as_a_closed_enum():
+    """The schema diff is exactly one property, and it is the closed executor set."""
+    document = schema_mod.config_schema()
+    prop = document["$defs"]["JudgeRule"]["properties"]["judge"]
+    assert "litellm" in json.dumps(prop) and "native" in json.dumps(prop), prop
+    assert set(judges_mod.RULE_KEYS) == set(models_mod.JudgeRule.model_fields)
+
+
+# ---------------------------------------------------------------------------
 # (H5) the discriminator: thresholds-only declares no spec; `model` alone does not either
 # ---------------------------------------------------------------------------
 def test_threshold_only_rules_declare_no_spec():
@@ -375,6 +436,39 @@ def test_plan_eval_and_calibrate_reject_an_invalid_spec_before_any_spend():
         assert ledger.MemoryLedger.artifacts == {}, (args, ledger.MemoryLedger.artifacts)
 
 
+#: A declared spec whose executor is not in the closed set (WP3b.3 A1).
+INVALID_EXECUTOR = """
+judges:
+  helpful:
+    model: gpt-4o-2024-11-20
+    rubric: score it
+    prompt_version: "1"
+    judge: openai
+"""
+
+
+def test_an_unknown_executor_is_exit_2_in_every_loader():
+    """`judges`, `plan`, `eval` and `calibrate` all reject it before spending or recording."""
+    root, ledger = _ledger_project(proj.ledger_config(proj.ledger_name()) + INVALID_EXECUTOR)
+    # the dirty tree must not be reached either: the spec rejection is earlier still
+    (root / "scratch.txt").write_text("uncommitted\n")
+    for args in (
+        ("judges",),
+        ("plan", "--dataset", "smoke", "--stage", "dev"),
+        ("eval", "--dataset", "smoke", "--stage", "dev"),
+        ("calibrate", "--dataset", "judge_calibration"),
+    ):
+        code, envelope = proj.run_cli_in_process(root, *args)
+        assert code == 2, (args, code, envelope)
+        assert envelope["ok"] is False and envelope["code"] == 2, (args, envelope)
+        message = envelope["errors"][0]["message"]
+        assert "judges.helpful.judge" in message, (args, message)
+        assert envelope["data"] == {}, (args, envelope["data"])
+        assert ledger.MemoryLedger.runs == {}, (args, ledger.MemoryLedger.runs)
+        assert ledger.MemoryLedger.artifacts == {}, (args, ledger.MemoryLedger.artifacts)
+    shutil.rmtree(root, ignore_errors=True)
+
+
 def test_a_valid_spec_changes_nothing_about_how_scorers_are_built():
     """The specs are not threaded into scorers yet (that is WP3b.2): same scorers, same order."""
     root = proj.project()
@@ -404,7 +498,17 @@ def test_the_judges_command_is_deterministic_and_lists_both_branches():
         assert [entry["name"] for entry in data["judges"]] == ["correctness"], data
         assert data["unpinned"] == ["helpful"], data
         entry = data["judges"][0]
-        assert set(entry) == {"name", "model", "prompt_version", "scale", "sampling", "rubric_chars", "rubric_hash"}
+        assert set(entry) == {
+            "name",
+            "model",
+            "prompt_version",
+            "scale",
+            "sampling",
+            "judge",  # WP3b.3 (additive): the executor
+            "rubric_chars",
+            "rubric_hash",
+        }
+        assert entry["judge"] == "native", "an absent `judge` key means the evaluator's native adapter"
         assert entry["model"] == "fake-judge-2024-11-20" and entry["prompt_version"] == "3"
         assert entry["rubric_hash"] == hashlib.sha256(CLI_RUBRIC.encode()).hexdigest()[:12], entry
         assert "Score 1.0" not in json.dumps(data)  # the rubric text never reaches the payload

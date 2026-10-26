@@ -66,6 +66,30 @@ def _retry(call, retries, backoff, limiter) -> Any:
             time.sleep(backoff * (2**attempt) + random.uniform(0, backoff))
 
 
+def _merge_scorer_usage(row: RowResult, collectors: list[Any]) -> None:
+    """Fold usage reported *inside* the scorers into ``row.usage``, additively.
+
+    A judge scorer bills its own vendor call, so its tokens are part of the row's usage. The merge
+    never replaces what ``predict`` reported: tokens add, and ``cost_usd`` adds when either side has
+    a value (``None`` only when neither does). Reported usage also keeps its precedence over
+    tracer-derived usage, because the backfill below only fills a ``None`` ``row.usage``.
+    """
+    reported = [c for c in collectors if c.reported]
+    if not reported:
+        return
+    tin = sum(int(c.input_tokens) for c in reported)
+    tout = sum(int(c.output_tokens) for c in reported)
+    costs = [c.cost_usd for c in reported if c.cost_usd is not None]
+    scorer_cost = sum(costs) if costs else None
+    if row.usage is None:
+        row.usage = Usage(tin, tout, scorer_cost)
+        return
+    cost = None
+    if row.usage.cost_usd is not None or scorer_cost is not None:
+        cost = (row.usage.cost_usd or 0.0) + (scorer_cost or 0.0)
+    row.usage = Usage(row.usage.input_tokens + tin, row.usage.output_tokens + tout, cost)
+
+
 class CorePlugin(Plugin, Tracer, Evaluator):
     name = "core"
     provides = ("tracer", "evaluator")
@@ -109,17 +133,30 @@ class CorePlugin(Plugin, Tracer, Evaluator):
             instrument(tcfg.get("instrument") or [])
 
         def score(row: RowResult):
+            reported: list[Any] = []
+
             def one(s) -> Any:
                 """A scorer's scores, or an ``{"__error__": msg}`` sentinel (one pool.map carries both)."""
                 try:
-                    return _retry(
-                        lambda: call_scorer(
-                            s, inputs=row.inputs, outputs=row.outputs, expectations=row.expectations, trace=row.trace
-                        ),
-                        retries,
-                        backoff,
-                        limiter,
-                    )
+                    # A scorer can bill its own vendor call (a judge reports its tokens), and
+                    # contextvars do not cross the pool thread: the collector must be opened *here*,
+                    # inside the worker, or the report is invisible. The collector object outlives
+                    # its context, so it is carried out and read after the pool -- including when
+                    # the scorer raised, since tokens spent before an error are still spent.
+                    with collect() as collector:
+                        reported.append(collector)
+                        return _retry(
+                            lambda: call_scorer(
+                                s,
+                                inputs=row.inputs,
+                                outputs=row.outputs,
+                                expectations=row.expectations,
+                                trace=row.trace,
+                            ),
+                            retries,
+                            backoff,
+                            limiter,
+                        )
                 except Exception as e:  # noqa: BLE001
                     return {"__error__": f"{scorer_name(s)}: {type(e).__name__}: {e}"}
 
@@ -129,6 +166,7 @@ class CorePlugin(Plugin, Tracer, Evaluator):
                         row.error = (row.error + "; " if row.error else "") + res["__error__"]
                     else:
                         row.scores.update(res)
+            _merge_scorer_usage(row, reported)
             return row
 
         def run_row(item):

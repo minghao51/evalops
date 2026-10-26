@@ -41,6 +41,21 @@ A judge number that is a bool, non-finite (``.inf``/``.nan``) or too large for a
 For the same bad value the model path is therefore *more* specific (``.scale.max``) than the spec
 path (``.scale``); a test that only checks a substring cannot tell the two layers apart.
 
+Which executor runs the judge (packet A1/A2, WP3b.3)
+---------------------------------------------------
+``judges.<name>.judge`` selects *how* a declared spec is executed, from a closed set:
+
+* absent or ``null`` or ``"native"`` -- the evaluator backend's own judge (the WP3b.2 adapter
+  registry in :mod:`evalops.scorers.native`, selected by the ``evaluator`` plugin name);
+* ``"litellm"`` -- the evalops-owned rubric fallback (:mod:`evalops.scorers.litellm_judge`),
+  which is evaluator-independent.
+
+``judge`` is **not** one of :data:`SPEC_KEYS`: it is an executor choice, not a declaration. A rule
+carrying only thresholds plus ``judge: litellm`` still declares no spec and stays a no-op key;
+only a *declared* spec can select an executor. An unknown value is exit 2 at
+``judges.<name>.judge`` (the config model at the exact key, :meth:`JudgeSpec.validate` at the dotted
+path), never a silent default.
+
 Global "every judge must be pinned" enforcement is **WP3b.5** (gate refusal, resolved-model
 recording per verdict); this module only makes a *declared* spec validatable and load-rejected.
 
@@ -62,13 +77,18 @@ from .util import EXIT_USAGE, EvalOpsError, sha256
 SCALE_KINDS: tuple[str, ...] = ("binary", "ordinal", "continuous")
 
 #: The keys that make a ``judges.<name>`` rule *declare* a spec (packet A2).
+#: ``judge`` is deliberately absent: it selects an executor and never declares a spec (WP3b.3 A1).
 SPEC_KEYS: tuple[str, ...] = ("rubric", "scale", "prompt_version", "sampling")
+
+#: The closed set of executors a *declared* spec may name (packet A1). ``native`` is the default
+#: and covers an absent/``null`` key; ``litellm`` is the evalops rubric fallback.
+JUDGE_EXECUTORS: tuple[str, ...] = ("native", "litellm")
 
 #: The calibration thresholds ``calibrate`` reads; they never declare a spec on their own.
 THRESHOLD_KEYS: tuple[str, ...] = ("min_agreement", "min_kappa", "max_mae", "label", "threshold")
 
 #: Every key a ``judges.<name>`` rule may carry (the config model is the enforcing surface).
-RULE_KEYS: tuple[str, ...] = (*THRESHOLD_KEYS, "model", *SPEC_KEYS)
+RULE_KEYS: tuple[str, ...] = (*THRESHOLD_KEYS, "model", "judge", *SPEC_KEYS)
 
 #: Alias / default forms that are **not** a pin (CONTRACT §6). Compared case-insensitively.
 UNPINNED_ALIASES: frozenset[str] = frozenset({"default", "latest", "auto", "project-default"})
@@ -140,6 +160,8 @@ class JudgeSpec:
     #: A spec without an explicit scale is a binary judge over ``0..1`` (``Scale`` needs ``max``).
     scale: Scale = field(default_factory=lambda: Scale(max=1.0))
     sampling: Sampling = field(default_factory=Sampling)
+    #: The executor: ``native`` (the evaluator's own judge, the default) or ``litellm`` (fallback).
+    judge: str = "native"
 
     @classmethod
     def from_rule(cls, name: str, rule: Mapping[str, Any]) -> JudgeSpec:
@@ -153,6 +175,8 @@ class JudgeSpec:
             prompt_version=cast(str, rule.get("prompt_version")),
             scale=_scale_from(name, rule.get("scale")),
             sampling=_sampling_from(name, rule.get("sampling")),
+            # absent and an explicit ``null`` both mean the evaluator's native adapter (A1)
+            judge=_executor_from(rule.get("judge")),
         )
         spec.validate(threshold=_as_float(rule.get("threshold")))
         return spec
@@ -179,6 +203,13 @@ class JudgeSpec:
             _fail(f"{path}.prompt_version", "a judge spec needs a non-empty prompt_version")
         if self.prompt_version.strip().lower() == "latest":
             _fail(f"{path}.prompt_version", "'latest' is not a prompt version pin; name the version")
+
+        if self.judge not in JUDGE_EXECUTORS:
+            _fail(
+                f"{path}.judge",
+                f"unknown judge executor {_show(self.judge)}; use one of {list(JUDGE_EXECUTORS)} "
+                "(omit the key for the evaluator's native judge)",
+            )
 
         self._validate_scale(threshold)
         self._validate_sampling()
@@ -233,6 +264,7 @@ class JudgeSpec:
             "prompt_version": self.prompt_version,
             "scale": dataclasses.asdict(self.scale),
             "sampling": dataclasses.asdict(self.sampling),
+            "judge": self.judge,
             "rubric_chars": len(self.rubric),
             "rubric_hash": rubric_hash(self.rubric),
         }
@@ -287,6 +319,15 @@ def _as_float(value: Any) -> Any:
         return float(value)
     except (TypeError, ValueError, OverflowError):
         return value
+
+
+def _executor_from(raw: Any) -> Any:
+    """The declared executor, with an absent/``null`` key meaning ``native`` (packet A1).
+
+    Only the two null-ish config forms are normalized here; anything else is passed through so
+    :meth:`JudgeSpec.validate` rejects it at ``judges.<name>.judge`` (never a silent default).
+    """
+    return "native" if raw is None else raw
 
 
 def _scale_from(name: str, raw: Any) -> Scale:

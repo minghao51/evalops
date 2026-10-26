@@ -16,6 +16,8 @@ from . import tools as tools_mod
 from .contract import formats, redact
 from .ports import DatasetStore, Evaluator, Ledger, RowResult, Tracer
 from .registry import Registry
+from .scorers.judges import spec_judge
+from .scorers.native import adapters
 from .scoring import aggregate_rows, call_scorer, scorer_name, wants_trace
 from .traces import capture as trace_capture
 from .traces.model import AgentTrace
@@ -44,6 +46,53 @@ def _build_scorers(cfg):
     return fn(evaluator=cfg.plugins["evaluator"]) if "evaluator" in inspect.signature(fn).parameters else fn()
 
 
+def _client_side_judge_calls(cfg, evaluator: str) -> int:
+    """How many declared judge specs make one **client-side** model call per row (WP3b.3 D2).
+
+    This is the estimate's judge bump. A declared spec costs a local model call unless its executor
+    runs it elsewhere: the ``litellm`` fallback always calls out from this process, and a native
+    adapter does too unless the vendor runs the judge itself (``NativeJudge.server_side``, i.e. the
+    Langfuse managed evaluator). An evaluator with no adapter is counted: it will be exit 6 at
+    scorer build, and silently underestimating it first would be worse than an honest count.
+
+    ``evaluator`` is a plugin **name** (``cfg.plugins["evaluator"]`` in ``plan``, the instantiated
+    plugin's ``name`` in ``_evaluate``): resolving it needs no plugin instance. Projects with no
+    declared spec get ``0`` and therefore a byte-identical estimate.
+    """
+    declared = judges.load(cfg)
+    if not declared:
+        return 0
+    adapter = adapters().get(evaluator)
+    # No adapter: the spec cannot build, but counting it keeps the estimate honest meanwhile.
+    server_side_native = adapter is not None and adapter.server_side
+    return sum(1 for spec in declared.values() if spec.judge == "litellm" or not server_side_native)
+
+
+def _with_spec_judges(cfg, scorers, *, evaluator: str):
+    """Append one scorer per declared judge spec, in sorted name order (WP3b.3 D1).
+
+    The app's ``scorers`` hook keeps ownership of its own scorers: a declared spec that reuses one
+    of its names is **exit 2**, naming both sources -- ambiguous ownership is refused rather than
+    silently replacing or duplicating the app's scorer. Building the spec scorers here also makes a
+    missing executor SDK exit 6 *before* the budget reservation and the ledger row, the same
+    failure class as an app hook raising today. No declared spec -> the list is returned as-is.
+    """
+    declared = judges.load(cfg)
+    if not declared:
+        return list(scorers)
+    out = list(scorers)
+    taken = {scorer_name(s) for s in out}
+    for name in sorted(declared):
+        if name in taken:
+            raise EvalOpsError(
+                f"judge '{name}': ambiguous ownership: the app's `scorers` hook already provides a "
+                f"scorer named '{name}' and `judges.{name}` declares a spec; rename one of them",
+                EXIT_USAGE,
+            )
+        out.append(spec_judge(declared[name], evaluator=evaluator))
+    return out
+
+
 def _tool_mode(cfg, stage, override):
     mode = override or (cfg.section("tools").get("mode_by_stage") or {}).get(stage) or "live"
     if mode not in TOOL_MODES:
@@ -61,11 +110,15 @@ def plan(cfg, dataset, stage, repeats=None, judge_only=False) -> dict:
         raise EvalOpsError(f"dataset '{dataset}' not synced; run `evalops sync datasets`", EXIT_USAGE)
     ledger = cast(Ledger, reg.get("ledger"))
     meta = cfg.hook("judge_meta")()
+    # D2/WP3b.3: a declared judge spec adds one client-side model call per row. The evaluator is
+    # resolved by *name* from the config (a plain read) -- plan never instantiated that plugin and
+    # still does not. No declared spec -> 0 extra calls, so existing estimates are unchanged.
+    n_llm = int(meta.get("llm_judge_count", 0)) + _client_side_judge_calls(cfg, cfg.plugins["evaluator"])
     est = cost.estimate(
         cfg,
         entry["rows"],
         _repeats(cfg, stage, repeats),
-        int(meta.get("llm_judge_count", 0)),
+        n_llm,
         judge_only,
         cost.history(ledger),
     )
@@ -233,7 +286,9 @@ def _evaluate(
     dstore = cast(DatasetStore, reg.get("datasets"))
     reps = _repeats(cfg, stage, repeats)
     meta = cfg.hook("judge_meta")()
-    n_llm = int(meta.get("llm_judge_count", 0))
+    # D2/WP3b.3: the estimate also pays for the declared judge specs that call out from this
+    # process (the litellm fallback, or a native adapter that is not server-side).
+    n_llm = int(meta.get("llm_judge_count", 0)) + _client_side_judge_calls(cfg, evaluator_plugin.name)
     frozen = bool((cfg.section("datasets").get(dataset) or {}).get("frozen"))
     records, dlock = ds_mod.load(cfg, reg, dataset, verify=frozen)
     est = cost.estimate(cfg, dlock["rows"], reps, n_llm, judge_only, cost.history(ledger))
@@ -262,6 +317,11 @@ def _evaluate(
     cfg_hash = sha256(canonical(full_cfg))[:8]
     version = f"{cfg.data['project']}-{git_sha(cwd=cfg.root)}-{cfg_hash}"
     scorers = _build_scorers(cfg)
+    # D1/WP3b.3: a declared judge spec is a real scorer. Appended after the app's own scorers (so
+    # their order is untouched) and before the `--scorer` filter, which must be able to select one.
+    # A name collision with an app scorer is exit 2 here -- before the budget reservation and the
+    # ledger row below -- and a missing executor SDK is exit 6 at the same point.
+    scorers = _with_spec_judges(cfg, scorers, evaluator=evaluator_plugin.name)
     if scorer_filter:
         scorers = [s for s in scorers if scorer_name(s) in scorer_filter]
     predict_fn = None if judge_only else cfg.hook("predict_fn")(prompts)

@@ -183,6 +183,13 @@ class JudgeRule(_Strict):
     label: str | None = None
     threshold: JudgeNumber | None = None
     model: str | None = None
+    # `judge` selects the executor of a *declared* spec: absent/null/"native" is the evaluator
+    # backend's own judge, "litellm" is the evalops rubric fallback (WP3b.3); anything else is exit 2
+    # at `judges.<name>.judge`. The closed set is the annotation below (no prose in the class
+    # docstring: that docstring *is* the generated schema `description`, and the WP3b.3 schema diff
+    # has to stay the one property). It never declares a spec on its own, so a threshold-only rule
+    # with `judge: litellm` stays a no-op key.
+    judge: Literal["native", "litellm"] | None = None
     rubric: str | None = None
     scale: ScaleRule | None = None
     prompt_version: str | None = None

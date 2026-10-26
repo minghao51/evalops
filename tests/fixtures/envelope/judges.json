@@ -20,6 +20,7 @@
           "max_tokens": 256,
           "seed": 7
         },
+        "judge": "native",
         "rubric_chars": 118,
         "rubric_hash": "8b83464e4637"
       }

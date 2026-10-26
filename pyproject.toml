@@ -19,6 +19,10 @@ logfire = ["logfire>=3"]
 sql = ["sqlalchemy>=2", "psycopg[binary]>=3"]  # only for non-SQLite ledgers (Postgres, MySQL, ...)
 otel = ["opentelemetry-sdk>=1.27"]    # trace capture for OTel-instrumented frameworks
 langgraph = ["langchain-core>=0.3"]   # native LangChain/LangGraph callback capture
+# The evalops rubric judge fallback (WP3b.3): `judges.<name>.judge: litellm`. No preset and no
+# plugin requires it -- the native judges are the default -- so it is installed by hand, never by
+# a preset's extras, and an absent package is exit 6 with `pip install litellm`.
+litellm = ["litellm>=1.40"]
 # OpenInference instrumentors are installed per framework, e.g.
 #   pip install openinference-instrumentation-crewai openinference-instrumentation-llama-index
 dev = ["pytest>=8", "pytest-xdist>=3", "hypothesis>=6", "ruff>=0.9", "mypy>=1.10"]

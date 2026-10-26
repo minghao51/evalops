@@ -435,6 +435,22 @@
               "default": null,
               "title": "Model"
             },
+            "judge": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "native",
+                    "litellm"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Judge"
+            },
             "rubric": {
               "anyOf": [
                 {
