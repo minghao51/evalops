@@ -222,6 +222,7 @@ Repo: https://github.com/minghao51/evalops (public). CI: GitHub Actions matrix 3
 | 3b.1 `JudgeSpec` | done | `173a416` — rubric/scale/pin/prompt_version/sampling in core; unpinned declared spec = exit 2 at load; `evalops judges` identity surface + `unpinned` worklist; two-layer numeric validation (no `Infinity`/`NaN` in an envelope, no `OverflowError`, oversized YAML ints = exit 2 naming the file) |
 | 3b.2 native judge adapters | done | `c2beda5` — one adapter per evaluator (`scorers/native.py` registry: MLflow `make_judge`, Langfuse managed evaluators + read-back, openevals, pydantic-evals), all offline fake-SDK-tested; `ImportError` → `CapabilityError` exit 6 naming the pip package; `spec_judge` wrapper in `scorers/judges.py`; generated native-judges capability section; no `plan`/`evaluate`/`calibrate` wiring (3b.3) |
 | 3b.3 LiteLLM rubric fallback + wiring | done | `f8668fe` — `judges.<name>.judge` executor key (closed set, both layers); `scorers/litellm_judge.py` (full spec → `litellm.completion`, JSON mode, strict parsing: NaN/unrepresentable/non-number = judge-named exit 5, scale clamp, rubric-checked evidence, `report_usage` per call); core evaluator's usage collector now covers scoring (additive merge); `plan`/`evaluate` count client-side judge calls; collisions exit 2; the `litellm` extra |
+| 3b.4 pairwise + panel wrappers | done | `59518c2` — `scorers/panel.py` (`normalize_pairwise` closed verdict set; both-orders pairwise + `swap_agreement`; mean/majority/agreement panel + always-on `panel_disagreement`; construction exit-2 validation), app-hook composables, no config surface, vendor-free |
 
 **G0 closed.** CI run `40047473262` on `main`: py3.10 / 3.11 / 3.12 all green.
 **G1 closed** (2026-10-24, at 283 tests): the full checklist and evidence are in
@@ -232,20 +233,21 @@ match the bash stages and `--dry-run` lists them), seven presets (`init --preset
 capability matrix), calibration enforced (a below-threshold calibration fails real `pr`/`main` and
 the stage error names the failing check). Evidence: [`HANDOFF.md`](../HANDOFF.md) §6.
 
-**Next:** phase **3b** continues (judges, native-first; D6) — WP3b.1 (`173a416`), WP3b.2 (`c2beda5`)
-and WP3b.3 (`f8668fe`) are done: a declared `JudgeSpec` now resolves to a real scorer (native
-adapter or the LiteLLM fallback via `judges.<name>.judge`), with strict parsing, rubric-checked
-evidence and per-call usage attribution. Next is **WP3b.4** (pairwise (position swap) + panel
-(mean/majority/agreement) wrappers; swap-invariance: A vs B and B vs A agree after normalization;
-panel disagreement reported), then — WP3b.5 — pin enforcement for **every** judge, resolved model
+**Next:** phase **3b** continues (judges, native-first; D6) — WP3b.1 (`173a416`), WP3b.2 (`c2beda5`),
+WP3b.3 (`f8668fe`) and WP3b.4 (`59518c2`) are done: a declared `JudgeSpec` resolves to a real
+scorer (native or LiteLLM), and the comparison wrappers (pairwise position-swap with reported
+`swap_agreement`; panel with always-reported `panel_disagreement`) compose any of them. The last
+3b WP is **WP3b.5**: pin enforcement for **every** judge (gate refusal exit 1; `judge_meta()`
+never overrides the config pin; `unpinned` becomes exhaustive), resolved model + prompt version
 recorded per verdict, the nightly server-side settings check, and calibration as a gate input.
 **G3b** tags `v0.5.0`. Phase 3 (vendor contract verification) comes after 3b and needs
 docker + credentials. Live status: [`docs/STATE.md`](STATE.md) · entry point + coordination rules:
 [`HANDOFF.md`](../HANDOFF.md) §0/§4.
 
-**Next increment:** phase 3b — write `docs/packets/WP3b.4.md` (from the phase-3b row above and
-`docs/packets/WP3b.3.md`, the newest template) and dispatch it to `evalops-worker` after
-`HANDOFF.md` §4's coordination fetch check.
+**Next increment:** phase 3b — write `docs/packets/WP3b.5.md` (from the phase-3b row above and
+`docs/packets/WP3b.4.md`, the newest template) and dispatch it to `evalops-worker` after
+`HANDOFF.md` §4's coordination fetch check. WP3b.5 touches `gate.py` and the verdict-recording
+path: expect the packet to need CONTRACT §6's enforcement bullets turned into done-when items.
 
 ### Phase 0 delivered
 

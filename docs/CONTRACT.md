@@ -563,6 +563,17 @@ rule is binding on new code but only enforced where a test exists.
   (`server_side` executors do not bump); a name collision between an app-provided scorer and a
   declared spec is exit 2 before any ledger row. Spec validity remains exit 2 at `judges.load`
   before any estimate; executor SDK availability is exit 6 at scorer build, before reservation.
+- **Pairwise and panel wrappers exist as app-hook composables (WP3b.4).** `scorers/panel.py` is
+  vendor-free and holds `normalize_pairwise` (closed verdict set `a`/`b`/`tie`, strict rejection —
+  never a silent tie), `pairwise_judge` (both orders per row; the decision plus a
+  `name/swap_agreement` metric, so a position-biased judge is visible as `0.0`, and swap
+  disagreement lands on the visible `0.5`), and `panel_judge` (≥2 members aggregated by mean,
+  strict majority — no majority is the visible `0.5` — or exact agreement — no consensus is
+  `None`; `name/panel_disagreement` is emitted whenever votes exist). They have **no** config
+  surface and **no** run.py/gate wiring: they are composables an app hook returns, exactly like
+  `span_judge`/`trajectory_judge`; their extra judge calls must be accounted in
+  `judge_meta().llm_judge_count`. Resolved-model recording and gate-time pin enforcement remain
+  **WP3b.5**.
 
 ## 7. Third-party plugin requirements
 

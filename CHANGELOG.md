@@ -9,6 +9,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: se
 
 ### Added
 
+- **WP3b.4 pairwise + panel wrappers (2026-10-24):** the map's comparison judges, as app-hook
+  composables over whichever judge is in use (`scorers/panel.py`, pure Python, vendor-free — the
+  same shape as `span_judge`/`trajectory_judge`). `normalize_pairwise` maps a verdict to
+  `a`/`b`/`tie` from a closed set (case-insensitive strings, `1`/`-1`/`0`, a `{'winner': ...}`
+  mapping) with a `swapped` frame-flip; unknown values are wrapper-named exit-5 errors, never a
+  silent tie. `pairwise_judge` calls the judge in **both orders** per row and emits the decision
+  plus `name/swap_agreement` — a position-biased judge shows up as `0.0`, never smoothed;
+  swap disagreement lands on the visible `0.5`. `panel_judge` aggregates ≥2 members by mean,
+  strict majority (no majority → visible `0.5`), or exact agreement (no consensus → `None`) and
+  always emits `name/panel_disagreement` (`1 −` largest vote share) when votes exist; `None` votes
+  are excluded, multi-metric members are rejected by index, and members/method are validated at
+  construction with exit 2 (generators, strings and unhashable methods included). No config
+  surface, no run.py/gate wiring (3b.5); cost documented (2 calls/row pairwise, one per member
+  per row panel — `judge_meta.llm_judge_count` must account for them). 433 → 454 tests. Review:
+  1 BLOCK round (2 construction-validation defects: generators accepted as a panel; unhashable
+  method raising raw `TypeError`) + narrow fix + narrow re-review PASS.
 - **WP3b.3 LiteLLM rubric fallback + spec→scorer wiring (2026-10-24):** a declared `JudgeSpec` now
   resolves to a real scorer. `judges.<name>.judge` selects the executor — absent/`native` uses the
   evaluator's WP3b.2 native adapter, `litellm` the evalops rubric fallback; the key is a closed set
