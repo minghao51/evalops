@@ -1,5 +1,8 @@
 # WP1.2 Postgres contract backend. `make contract` starts it automatically when no
 # EVALOPS_TEST_POSTGRES_URL is set, and skips cleanly when docker or the driver is unavailable.
+# WP3.1a adds the MLflow tracking server (`tests/contract/test_mlflow_plugin.py`): port 55000 so a
+# developer's own mlflow on 5000 never collides, and a named volume so prompt/dataset/run state
+# survives `docker compose down` (only `down -v` resets it).
 services:
   postgres:
     image: postgres:16-alpine
@@ -14,3 +17,24 @@ services:
       interval: 1s
       timeout: 3s
       retries: 30
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    # Artifacts are *proxied* (`mlflow-artifacts:/` -> this server -> the volume). With a plain
+    # `--default-artifact-root /mlflow/artifacts` the server hands that container-local path to
+    # clients verbatim (MLflow 3.17 `resolve_default_artifact_root`), so a host client tries to write
+    # `/mlflow` itself and fails with PermissionError.
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --serve-artifacts --artifacts-destination /mlflow/artifacts
+    ports:
+      - "55000:5000"
+    volumes:
+      - mlflow:/mlflow
+    healthcheck:
+      # The image ships no curl/wget; probe /health with the interpreter it does ship.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  mlflow: {}
