@@ -11,7 +11,8 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   check + calibration as gate input), then **G3b** (`v0.5.0`).
 - **Verified base:** `59518c2` (WP3b.4) — **tests:** 454 green (`make check`), standalone 454/454.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
-  `main` (last completed runs: `40109899232` WP3b.1 feature; phase-2 close at `40103336121`).
+  `main` (last completed runs: `40341111179` WP3b.4 docs; the WP3b.4 feature run and
+  `40333980989` env-template chore also green).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2

@@ -21,7 +21,7 @@ templates.
 | Phase 3b | **WP3b.1 done** (`173a416`: `JudgeSpec`); **WP3b.2 done** (`c2beda5`: native adapters); **WP3b.3 done** (`f8668fe`: LiteLLM fallback + wiring); **WP3b.4 done** (`59518c2`: pairwise/panel wrappers); **WP3b.5 last** |
 | Tree | clean; no uncommitted work |
 | Next artifact | `docs/packets/WP3b.5.md` (copy `docs/packets/WP3b.4.md`, the newest template) |
-| Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; needs LiteLLM optional dep + fake SDK fixtures (offline) |
+| Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; fallback only where declared. The LiteLLM optional dep + fake SDK fixtures already landed (3b.3); only WP3b.5 remains |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
 before every commit. The exact opening message is at the end of §10.
@@ -114,7 +114,7 @@ Three agents, defined in `.pi/agents/` (project scope, symlinked at the session 
 |---|---|---|
 | `evalops-scout` | `deepseek/deepseek-flash` | read-only recon, compressed findings with `file:line` |
 | `evalops-worker` | `deepseek/deepseek-flash` | implements exactly one WP, tests green, **no commits** |
-| `codex-luna-reviewer` (user scope, `~/.pi/agent/agents/`) | `openai-codex/gpt-6-luna` @ **xhigh** | adversarial review: runs commands, falsifies claims, PASS/BLOCK — **the current verified route** (WP2.4 + WP3b.1) |
+| `codex-luna-reviewer` (user scope, `~/.pi/agent/agents/`) | `openai-codex/gpt-6-luna` @ **xhigh** | adversarial review: runs commands, falsifies claims, PASS/BLOCK — **the current verified route** (WP2.4, WP3b.1–3b.4) |
 | `evalops-reviewer` (project scope) | `zai/glm-5.3-flash` @ high | previous reviewer route (WP1.x–WP2.3); fine when zai has quota |
 
 Fallback, verified 2026-10-24: `opencode-go/deepseek-v4.1-flash` (`OPENCODE_API_KEY`) runs the
@@ -169,6 +169,9 @@ Observed review budget:
 | WP2.4 CI adapters (parallel session) + cross-check of an independent duplicate | 1 BLOCK (6 defects) + narrow re-review PASS; the duplicate found no blocking defect (the fork-guard removal is a documented, reviewed decision — see §6) | 6 |
 | WP2.5 calibration enforcement | 1 (PASS, 0 defects; reviewer rebuilt the fixture, re-ran the pr/main failing and passing runs, and all 4 mutations) | 0 |
 | WP3b.1 JudgeSpec | 2 BLOCK + 1 orchestrator adjudication + narrow PASS (`Infinity` in the envelope + `OverflowError`; parser digit-limit exit 5 + un-normalised int bounds; the layer-naming point was adjudicated, not a defect — the test now pins the exact per-layer path) | 7 |
+| WP3b.2 native judge adapters | 1 (PASS, 0 defects; the worker's two declared deviations — pyright-ignores on the lazy imports, VERIFY-marked pass-through kwargs — reviewed and accepted) | 0 |
+| WP3b.3 LiteLLM fallback + wiring | 1 mid-WP orchestrator adjudication (H5 blocked: the core evaluator's usage collector did not cover scoring — allowed paths extended by a narrow core.py change) + 1 BLOCK (3 defects: `NaN` escaping the strict parser, rubric echo in error evidence, docstring leaking into the schema diff) + narrow fix + narrow re-review PASS (one adjudication: the untracked packet file = orchestrator artifact) | 3 |
+| WP3b.4 pairwise/panel wrappers | 1 BLOCK (2 construction-validation defects: generators accepted as a panel; unhashable method raising raw `TypeError`) + narrow fix + narrow re-review PASS | 2 |
 
 Reviewer route: `evalops-reviewer` pins `zai/glm-5.3-flash`. On 2026-10-24 zai's 5-hour quota was
 exhausted mid-session, so the WP2.4 cross-check and WP2.5 reviews ran on a substitute
@@ -396,8 +399,8 @@ Every checklist item holds; evidence:
   (docs) green on py3.10/3.11/3.12.
 - **Tag:** `v0.4.0` on the checklist commit (D10). No code change was needed.
 
-**Next:** phase **3b** (judges, native-first) — WP3b.1 `JudgeSpec` with the pin required
-(unpinned judge = exit 2) and `judge_meta()` unable to override it, then the native adapters.
+**Next:** phase **3b** (judges, native-first) — WP3b.1–3b.4 are done (see their DONE blocks below
+and [`docs/STATE.md`](docs/STATE.md)); only **WP3b.5** remains before **G3b** tags `v0.5.0`.
 `docs/CONTRACT.md` §6 already states the target contract; phase 3 (vendor contract verification)
 needs services/credentials and stays after 3b (D6).
 
@@ -503,16 +506,36 @@ cost documented (2 calls/row pairwise, one per member/row panel — `judge_meta.
 must account for them). 21 new tests (433 → 454). Review: 1 BLOCK round (2 construction-validation
 defects) + narrow fix + narrow re-review PASS.
 
+### WP3b.5 — pin enforcement + resolved model + nightly settings check + calibration as gate input (NEXT — the last 3b WP)
+
+Write the packet from the map's phase-3b row (copy `docs/packets/WP3b.4.md`'s shape — the newest
+template) and turn CONTRACT §6's enforcement bullets into falsifiable done-when items. Grounding:
+`src/evalops/gate.py` (where the gate refusal lands: an unpinned judge fails the gate with **exit 1**
+and a reason — never a warning), `src/evalops/judges.py` (`unpinned` becomes **exhaustive**: the
+deliberate WP3b.1 line — model-only rules are neither a spec nor on the worklist — is validated
+here too; STATE compromise 17), `src/evalops/run.py` (record the **resolved model + judge prompt
+version per verdict** — a verdict without a resolved model is a contract violation; mind the
+artifact/envelope discipline: additive payload keys, goldens regenerated once), and the nightly
+**server-side judge settings check** (Langfuse project defaults, pydantic-evals defaults — fake
+SDKs, offline; drift fails nightly; R3). **Calibration as a gate input** completes WP2.5's story:
+the pipeline-stage half already exists (the `data.judges` discriminator note in CONTRACT §6/§9),
+the gate-input half lands here. `judge_meta()` must never override the config pin — that conflict
+is exit 2 at load. Keep every exit code and envelope shape per CONTRACT §1/§2; expect the packet to
+add gate-level tests with mutation proof, and to keep threshold-only configs' behavior changes
+deliberate and pinned (this WP, unlike 3b.2–3b.4, DOES change gate behavior — call that out so the
+reviewer hunts for unintended refusals).
+
 After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) → 3b.4 (pairwise/panel) →
-3b.5 (pin enforcement + resolved model + calendar/settings check + calibration as gate input) →
-**G3b** tags `v0.5.0` (needs the LiteLLM optional dep and fake SDK fixtures; stays offline).
+3b.5 (pin enforcement + resolved model + nightly settings check + calibration as gate input) →
+**G3b** tags `v0.5.0` (the LiteLLM optional dep and fake SDK fixtures already landed in 3b.3;
+stays offline).
 
 ## 7. Remaining roadmap (phases 2 → 6)
 
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
 | **2** CLI/pipeline as code + presets — **closed at G2, tagged `v0.4.0`** | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
-| **3b** judges, native-first | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done**; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals), `scorers/judges.py` becomes wrappers; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost; 3b.4 pairwise (position swap) + panel; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. Needs LiteLLM optional dep + fake SDK fixtures (offline). |
+| **3b** judges, native-first — 3b.1–3b.4 **done** | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done** `173a416`; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals) **done** `c2beda5`; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost + spec→scorer wiring (`judges.<name>.judge`) **done** `f8668fe`; 3b.4 pairwise (position swap) + panel **done** `59518c2`; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input — **the only remaining 3b WP** | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. The LiteLLM optional dep + fake SDK fixtures are in (3b.3); stays offline. |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
 | **5** real framework trace fixtures | 5.1 real span fixtures × pinned versions (LangGraph, OpenAI Agents, ADK, Pydantic AI, CrewAI, LlamaIndex, Strands, AutoGen, Semantic Kernel, smolagents, DSPy); 5.2 verified dialect table + `traces --unknown-attrs`; 5.3 breaker parity + runaway-loop tests; 5.4 cassette parity + consent-gated record | 11 frameworks verified, drift visible in CI | **G5**. Heavy: installing 11 frameworks with pinned versions; needs user consent for recorded traces. |
