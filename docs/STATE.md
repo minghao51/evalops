@@ -6,10 +6,10 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
 
 - **Phase:** **phase 3b in progress** (judges, native-first) — WP3b.1 (`JudgeSpec`), WP3b.2 (native
   judge adapters), WP3b.3 (LiteLLM rubric fallback + spec→scorer wiring) and WP3b.4 (pairwise +
-  panel wrappers) are done. Phases 1 and 2 are closed (**G1**, **G2** at `v0.4.0`); the last 3b WP
-  is WP3b.5 (gate-time pin enforcement + resolved-model recording + nightly server-side settings
-  check + calibration as gate input), then **G3b** (`v0.5.0`).
-- **Verified base:** `59518c2` (WP3b.4) — **tests:** 454 green (`make check`), standalone 454/454.
+  panel wrappers) are done, and WP3b.5 (gate-time pin enforcement + resolved-model recording +
+  nightly server-side settings check + calibration as gate input) landed at `e484552` — phase 3b
+  is WP-complete; **G3b** (`v0.5.0`) closes it.
+- **Verified base:** `e484552` (WP3b.5) — **tests:** 482 green (`make check`), standalone 482/482.
   **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
   `main` (last completed runs: `40341111179` WP3b.4 docs; the WP3b.4 feature run and
   `40333980989` env-template chore also green).
@@ -101,21 +101,27 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    `_error_envelope`'s code normalization has a unit pin.
 13. **`ci_log.jsonl` is now one JSON envelope per line.** The bash pipeline teed multi-line rendered
    envelopes; line-oriented consumers still work, but the byte shape differs.
-14. **Calibration enforcement is stage-level (WP2.5).** A missing `datasets/judge_calibration.jsonl`
-   keeps the step a skip (pinned decision, not a failure); the `gate` command does not consume
-   calibration yet (WP3b.5). The enriched stage message is keyed on the `data.judges` payload shape,
+14. **Calibration enforcement is stage-level (WP2.5); the gate consumes evidence since WP3b.5.**
+   A missing `datasets/judge_calibration.jsonl` keeps the step a skip (pinned decision, not a
+   failure); since WP3b.5 (`e484552`) the `gate` command also consumes the judge's latest recorded
+   calibration evidence against the config's limits — failing evidence is a failed `judge
+   calibration: <name>` check, while **no** evidence still emits no check (the absence posture is
+   unchanged). The enriched stage message is keyed on the `data.judges` payload shape,
    so a future command emitting `judges` + failing `checks` would inherit the clause.
 15. **Fork PRs now run the `pr` stage (WP2.4).** The GitHub same-repo guard was deliberately removed;
    the state goes to the WP2.2 bot branch and the adapter documents the write-token prerequisite,
    but fork code executes with the workflow's permissions (`id-token: write` included) —
    **maintainer confirmation pending** (HANDOFF §8).
 16. **`evalops ci-adapters` has no envelope golden** while `capabilities` does (HANDOFF §8).
-17. **`JudgeSpec` validates only declared specs (WP3b.1).** A `judges.<name>` rule declares a spec
-   iff it carries `rubric`/`scale`/`prompt_version`/`sampling`. A rule with **only** `model` is
-   neither a spec nor on `evalops judges`'s `unpinned` list — today it is a no-op key, and WP3b.5
-   must validate the pin for **every** judge rather than treating `unpinned` as exhaustive. Numeric
-   validation is two-layered by design (config model at the exact key, `JudgeSpec.validate()` at
-   the owning path); both are exit 2 and neither can emit `Infinity`/`NaN` in an envelope.
+17. **`JudgeSpec` validates only declared specs (WP3b.1); the pin is enforced for every judge since
+   WP3b.5.** A `judges.<name>` rule declares a spec iff it carries `rubric`/`scale`/`prompt_version`/
+   `sampling`. WP3b.1 left a model-only rule as a no-op key; WP3b.5 (`e484552`) resolved the
+   compromise: `is_pinned_model` is now checked for **every** rule at gate time (an unpinned judge
+   is a failed `judge pin: <name>` check, exit 1), `evalops judges`'s `unpinned` list is the
+   exhaustive refusal worklist (model-only and threshold-only rules included), and a `judge_meta()`
+   identity that disagrees with a declared spec is exit 2 at load. Numeric validation stays
+   two-layered by design (config model at the exact key, `JudgeSpec.validate()` at the owning
+   path); both are exit 2 and neither can emit `Infinity`/`NaN` in an envelope.
 
 ## How to work in this repo
 

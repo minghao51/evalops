@@ -108,7 +108,7 @@ Rules that apply to every WP:
 | 3b.2 | Adapters: MLflow `make_judge`, Langfuse managed evaluators (server-side + read-back), openevals (LangSmith), pydantic-evals (Logfire/local); `scorers/judges.py` becomes wrappers | each adapter unit-tested against a fake SDK; capability matrix lists which preset has native judges |
 | 3b.3 | LiteLLM rubric fallback + strict parsing (JSON mode, scale clamp) + per-call cost | parse failures are errors, never silent 0.0; cost attributed per judge call |
 | 3b.4 | Pairwise (position swap) + panel (mean/majority/agreement) wrappers | swap-invariance test: A vs B and B vs A agree after normalization; panel disagreement reported |
-| 3b.5 | Pin enforcement + resolved-model recording per verdict + nightly server-side judge settings check + calibration as gate input | unpinned judge → exit 1 with reason; drift in judge model fails nightly; calibration blocks promotion |
+| 3b.5 | Pin enforcement + resolved-model recording per verdict + nightly server-side judge settings check + calibration as gate input | **done** — `e484552` (1 PASS review + 1 narrow mutation round; unpinned judge → exit 1 with reason; settings drift fails nightly; calibration evidence blocks the gate; 454 → 482 tests) |
 | **G3b** | | every preset's default judges are native, pinned, recorded; fallback only where declared |
 
 ### Phase 3 — Vendor contract verification (needs services)

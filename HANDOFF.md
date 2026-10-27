@@ -1,27 +1,27 @@
-# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b in progress (WP3b.1–3b.4 done; 3b.5 last)
+# HANDOFF: evalops — phase 2 closed at G2 (`v0.4.0`); phase 3b WPs all done (WP3b.5 at `e484552`) — next: close G3b, tag `v0.5.0`
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **454 offline + 1 Postgres contract test, deselected**).
+(tests: **482 offline + 1 Postgres contract test, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
-`docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and the next
-work is **phase 3b** (judges, native-first): WP3b.1 `JudgeSpec`, WP3b.2 (native adapters), WP3b.3
-(LiteLLM fallback + wiring) and WP3b.4 (pairwise/panel wrappers) landed; **WP3b.5** (pin
-enforcement + resolved-model recording + calibration as gate input) is the last WP before **G3b**
-tags `v0.5.0`. The completed `docs/packets/WP3b.4.md` / `WP3b.3.md` are the newest packet
-templates.
+`docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), and phase 3b
+(judges, native-first) is **WP-complete**: WP3b.1 `JudgeSpec`, WP3b.2 (native adapters), WP3b.3
+(LiteLLM fallback + wiring), WP3b.4 (pairwise/panel wrappers) and **WP3b.5** (pin enforcement +
+resolved-model recording + nightly settings check + calibration as gate input, `e484552`) all
+landed — only the **G3b close** (tag `v0.5.0` after CI green) remains before phase 3. The completed
+`docs/packets/WP3b.5.md` / `WP3b.4.md` are the newest packet templates.
 
 ## 0. Current snapshot (start here)
 
 | | |
 |---|---|
-| Verified base | `59518c2` (WP3b.4) — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
-| Tests | 454 offline (`make check`), standalone 454/454, 1 Postgres contract test (excluded) |
+| Verified base | `e484552` (WP3b.5) — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
+| Tests | 482 offline (`make check`), standalone 482/482, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
 | Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
-| Phase 3b | **WP3b.1 done** (`173a416`: `JudgeSpec`); **WP3b.2 done** (`c2beda5`: native adapters); **WP3b.3 done** (`f8668fe`: LiteLLM fallback + wiring); **WP3b.4 done** (`59518c2`: pairwise/panel wrappers); **WP3b.5 last** |
+| Phase 3b | **all WPs done**: 3b.1 `173a416`, 3b.2 `c2beda5`, 3b.3 `f8668fe`, 3b.4 `59518c2`, 3b.5 `e484552` — next: close G3b (tag `v0.5.0` after CI green) |
 | Tree | clean; no uncommitted work |
-| Next artifact | `docs/packets/WP3b.5.md` (copy `docs/packets/WP3b.4.md`, the newest template) |
-| Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; fallback only where declared. The LiteLLM optional dep + fake SDK fixtures already landed (3b.3); only WP3b.5 remains |
+| Next artifact | **G3b close**: checklist (every preset's default judges native + pinned + recorded; fallback only where declared) → tag `v0.5.0`. Then phase 3 (docker + credentials — ask the maintainer) |
+| Gate ahead | **G3b** (tag `v0.5.0`): every preset's default judges native + pinned + recorded; fallback only where declared. Enforcement is live since `e484552` |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
 before every commit. The exact opening message is at the end of §10.
@@ -45,7 +45,7 @@ reproducibility (cassettes). **Wrap and normalize, never rebuild.**
   re-verification (2.2), presets + capability matrix (2.3), the four generated CI adapters (2.4) and
   calibration enforcement (2.5). Phase 3b (judges, native-first) is nearly done: `JudgeSpec`
   (3b.1), the native judge adapters (3b.2), the LiteLLM fallback + spec→scorer wiring (3b.3) and
-  the pairwise/panel wrappers (3b.4) are in; only pin enforcement (3b.5) remains before **G3b**
+  the pairwise/panel wrappers (3b.4) are in, and pin enforcement (3b.5) landed (`e484552`) — only the **G3b**
   tags `v0.5.0`.
 
 ## 2. Non-negotiables (read before editing anything)
@@ -506,24 +506,25 @@ cost documented (2 calls/row pairwise, one per member/row panel — `judge_meta.
 must account for them). 21 new tests (433 → 454). Review: 1 BLOCK round (2 construction-validation
 defects) + narrow fix + narrow re-review PASS.
 
-### WP3b.5 — pin enforcement + resolved model + nightly settings check + calibration as gate input (NEXT — the last 3b WP)
+### WP3b.5 — pin enforcement + resolved model + nightly settings check + calibration as gate input (DONE, `e484552`)
 
-Write the packet from the map's phase-3b row (copy `docs/packets/WP3b.4.md`'s shape — the newest
-template) and turn CONTRACT §6's enforcement bullets into falsifiable done-when items. Grounding:
-`src/evalops/gate.py` (where the gate refusal lands: an unpinned judge fails the gate with **exit 1**
-and a reason — never a warning), `src/evalops/judges.py` (`unpinned` becomes **exhaustive**: the
-deliberate WP3b.1 line — model-only rules are neither a spec nor on the worklist — is validated
-here too; STATE compromise 17), `src/evalops/run.py` (record the **resolved model + judge prompt
-version per verdict** — a verdict without a resolved model is a contract violation; mind the
-artifact/envelope discipline: additive payload keys, goldens regenerated once), and the nightly
-**server-side judge settings check** (Langfuse project defaults, pydantic-evals defaults — fake
-SDKs, offline; drift fails nightly; R3). **Calibration as a gate input** completes WP2.5's story:
-the pipeline-stage half already exists (the `data.judges` discriminator note in CONTRACT §6/§9),
-the gate-input half lands here. `judge_meta()` must never override the config pin — that conflict
-is exit 2 at load. Keep every exit code and envelope shape per CONTRACT §1/§2; expect the packet to
-add gate-level tests with mutation proof, and to keep threshold-only configs' behavior changes
-deliberate and pinned (this WP, unlike 3b.2–3b.4, DOES change gate behavior — call that out so the
-reviewer hunts for unintended refusals).
+CONTRACT §6's enforcement bullets are live: every `judges.<name>` rule without a concrete pin fails
+the gate (exit 1, `judge pin: <name>` check; no-judges configs byte-identical — gate/eval/plan/
+traces goldens unmoved); a `judge_meta()` identity (`judge_model`/`judge_prompt_version`)
+disagreeing with any declared spec is exit 2 at load at plan/evaluate/calibrate (never at
+`evalops judges`); every declared-spec verdict records `judge_models[name]` in `rows.jsonl`
+(additive) plus `judge.<name>.model`/`.prompt_version` run params, and an identity-less verdict is
+the judge-named exit 5; the gate consumes the judge's latest calibration evidence (`evalops.kind:
+calibration`, latest by start_ms+run_id) against the config's limits — failing evidence is a failed
+`judge calibration: <name>` check, absence still emits nothing (STATE 14 intact); `unpinned` is the
+exhaustive refusal worklist (STATE 17 resolved; `judges.json` golden +1 line, the WP's only golden
+churn); `evalops judges --check-settings` compares declared pins to the Langfuse project default
+and the pydantic-evals default (fake-SDK offline, VERIFY-marked, exit 1 on drift, 6 on missing
+SDK), and the nightly stage runs it after `baseline`, before checkout. Deliberate behavior changes
+(fixture configs gained the pins their `judge_meta` already claimed): test_calibration_enforcement,
+test_pipeline, test_e2e_agent, test_litellm_judge. 28 new tests (454 → 482). Review: 1 PASS
+(codex-luna-reviewer, gpt-6-luna xhigh) + 1 narrow mutation round (all six C7 mutations red,
+golden byte-identity re-proven).
 
 After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) → 3b.4 (pairwise/panel) →
 3b.5 (pin enforcement + resolved model + nightly settings check + calibration as gate input) →
@@ -535,7 +536,7 @@ stays offline).
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
 | **2** CLI/pipeline as code + presets — **closed at G2, tagged `v0.4.0`** | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
-| **3b** judges, native-first — 3b.1–3b.4 **done** | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done** `173a416`; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals) **done** `c2beda5`; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost + spec→scorer wiring (`judges.<name>.judge`) **done** `f8668fe`; 3b.4 pairwise (position swap) + panel **done** `59518c2`; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input — **the only remaining 3b WP** | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. The LiteLLM optional dep + fake SDK fixtures are in (3b.3); stays offline. |
+| **3b** judges, native-first — 3b.1–3b.4 **done** | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done** `173a416`; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals) **done** `c2beda5`; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost + spec→scorer wiring (`judges.<name>.judge`) **done** `f8668fe`; 3b.4 pairwise (position swap) + panel **done** `59518c2`; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input **done** `e484552` | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. The LiteLLM optional dep + fake SDK fixtures are in (3b.3); stays offline. |
 | **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
 | **5** real framework trace fixtures | 5.1 real span fixtures × pinned versions (LangGraph, OpenAI Agents, ADK, Pydantic AI, CrewAI, LlamaIndex, Strands, AutoGen, Semantic Kernel, smolagents, DSPy); 5.2 verified dialect table + `traces --unknown-attrs`; 5.3 breaker parity + runaway-loop tests; 5.4 cassette parity + consent-gated record | 11 frameworks verified, drift visible in CI | **G5**. Heavy: installing 11 frameworks with pinned versions; needs user consent for recorded traces. |
@@ -606,79 +607,66 @@ ci/                      pipeline.sh (shim → `evalops pipeline`) + the four ge
 ## 10. First commands in the new thread
 
 ```bash
-cd /home/howt/work/evalops_universal/evalops && make check      # expect 454 passed, 1 deselected
+cd /home/howt/work/evalops_universal/evalops && make check      # expect 482 passed, 1 deselected
 git fetch origin && git log --oneline main..origin/main     # is the other session ahead? which WP?
 gh run list --limit 1                                       # confirm CI green on main
-git tag -l v0.4.0                                          # phase 2 close marker
+git tag -l v0.4.0                                           # phase 2 close marker (v0.5.0 = G3b)
 sed -n '/### Phase 3b/,/### Phase 3 —/p' docs/IMPLEMENTATION_MAP.md
-sed -n '/### WP3b.5/,/^## 7/p' HANDOFF.md                  # the pickup brief
+sed -n '/### WP3b.5/,/^## 7/p' HANDOFF.md                   # the WP that just landed
 ```
 
 Then:
 
 1. **Check §4's coordination rules first.** `git fetch` + `git log --oneline main..origin/main`:
-   if the other session has already landed a phase-3b WP, cross-check its commit against the map's
-   phase-3b row before doing anything else (disjoint trees or take the next WP).
-2. **Write the WP3b.5 packet** (`docs/packets/WP3b.5.md`, copying `docs/packets/WP3b.4.md`'s shape)
-   from the map's phase-3b row — the last 3b WP before **G3b** tags `v0.5.0`: gate-time pin
-   enforcement for **every** judge (an unpinned judge fails the gate with exit 1 and a reason;
-   `judge_meta()` must never override the config pin — that conflict is exit 2 at load;
-   `evalops judges`' `unpinned` worklist becomes exhaustive — STATE compromise 17), the resolved
-   model + prompt version recorded per verdict (a verdict without a resolved model is a contract
-   violation), the nightly server-side judge settings check (Langfuse project defaults,
-   pydantic-evals defaults; drift fails nightly), and calibration as a gate input. This WP touches
-   `gate.py` and the verdict-recording path — the packet must turn CONTRACT §6's enforcement
-   bullets into falsifiable done-when items, keep WP2.5's `data.judges` discriminator note in mind
-   (the calibration-as-gate-input half), and mind the deliberate WP3b.1 line: model-only rules are
-   validated here too. Dispatch `evalops-worker` (`deepseek/deepseek-flash`, cwd = the repo), then
-   review with `codex-luna-reviewer` (`openai-codex/gpt-6-luna`, thinking `xhigh`).
-3. Loop on BLOCK; on PASS run `make check`, commit (feature + separate docs commit), fetch/rebase,
-   push, and confirm CI. Then close **G3b** (the gate checklist: every preset's default judges
-   native + pinned + recorded; fallback only where declared; tag `v0.5.0`). Phase 3
-   (vendor contract verification) comes after 3b and needs docker + credentials — ask the
-   maintainer before starting it.
+   if the other session has already closed G3b or started phase 3, cross-check before doing
+   anything (disjoint trees or take the next WP).
+2. **Close G3b** — phase 3b is WP-complete (WP3b.5 at `e484552`). The gate checklist: every
+   preset's default judges native + pinned + recorded; fallback only where declared. Concretely:
+   the capability matrix lists a native adapter per evaluator (3b.2), every enforcement surface is
+   live (`judge pin:`/`judge calibration:` gate checks, exhaustive `unpinned`, `--check-settings`,
+   per-verdict `judge_models`), and `make check` + the zero-diff gates are green. Then tag
+   **`v0.5.0`** on main after CI is green.
+3. **Phase 3 (vendor contract verification) needs docker + LangSmith/Logfire/Databricks
+   credentials — ask the maintainer before starting it.** Two maintainer confirmations are still
+   pending (§8): the WP2.4 fork-PR posture and the missing `evalops ci-adapters` envelope golden.
 
 Suggested opening message for the new thread (paste as the first user message):
 
 ```text
 Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.5
-brief, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6 judge
-pinning — the enforcement bullets are this WP's done-when), docs/STATE.md (compromise 17), and the
-map's phase-3b row in docs/IMPLEMENTATION_MAP.md. We are in phase 3b (judges, native-first):
-WP3b.1 (JudgeSpec) at 173a416, WP3b.2 (native adapters) at c2beda5, WP3b.3 (LiteLLM fallback +
-strict parsing + per-call cost + spec→scorer wiring) at f8668fe, and WP3b.4 (pairwise/panel
-wrappers) at 59518c2 — phase 2 is closed at G2 (tag v0.4.0), 454 offline tests green (make check),
-CI green on py3.10/3.11/3.12. A second agent session may work this repo — follow HANDOFF §4's
-coordination rules: git fetch + git log --oneline main..origin/main before dispatching anything,
-fetch/rebase before every commit, never reimplement a WP that already landed
-(branch a duplicate as wp<N>-alternative-<sha>, cross-check, fix narrow gaps only), stay in
-disjoint trees, and serialize the phase-3b WPs because they touch the same files.
+record, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6 judge
+pinning — enforced since WP3b.5), docs/STATE.md (compromises 14/17 as resolved), and the map's
+phase-3b row + G3b gate in docs/IMPLEMENTATION_MAP.md. Phase 3b (judges, native-first) is
+WP-complete: WP3b.1 (JudgeSpec) at 173a416, WP3b.2 (native adapters) at c2beda5, WP3b.3 (LiteLLM
+fallback + wiring) at f8668fe, WP3b.4 (pairwise/panel wrappers) at 59518c2, and WP3b.5 (pin
+enforcement + resolved-model-per-verdict + nightly settings check + calibration as gate input) at
+e484552 — 482 offline tests green (make check), CI green on py3.10/3.11/3.12, phase 2 closed at G2
+(tag v0.4.0). A second agent session may work this repo — follow HANDOFF §4's coordination rules:
+git fetch + git log --oneline main..origin/main before dispatching anything, fetch/rebase before
+every commit, never reimplement a WP that already landed (branch a duplicate as
+wp<N>-alternative-<sha>, cross-check, fix narrow gaps only), stay in disjoint trees.
 
-Start WP3b.5 — the LAST phase-3b WP before G3b tags v0.5.0: gate-time pin enforcement for EVERY
-judge (an unpinned judge fails the gate with exit 1 and a reason; a judge_meta() that disagrees
-with the config pin is exit 2 at load; the `unpinned` worklist becomes exhaustive — STATE
-compromise 17 says model-only rules are validated here too), the resolved model + prompt version
-recorded per verdict (a verdict without a resolved model is a contract violation), the nightly
-server-side judge settings check (Langfuse project defaults, pydantic-evals defaults; drift fails
-nightly), and calibration as a gate input (mind WP2.5's `data.judges` discriminator note — the
-pipeline-stage half already exists). Offline rule unchanged: no vendor SDK into .venv (fake SDKs
-for the server-side check; LiteLLM/native paths are already fake-tested).
+First close G3b: verify the gate checklist (every preset's default judges native + pinned +
+recorded; fallback only where declared — the capability matrix + the live enforcement surfaces:
+judge pin/calibration gate checks, the exhaustive `unpinned` worklist, `evalops judges
+--check-settings`, per-verdict judge_models), run the full gate set (make check,
+tests/run_without_pytest.py, make contract, make schema/capabilities/ci-adapters zero diff), and
+tag v0.5.0 on main after CI is green.
 
-Protocol: write docs/packets/WP3b.5.md in the shape of docs/packets/WP3b.4.md (goal, fixed design
-decisions, falsifiable done-when, allowed/forbidden paths, commands, report format, reviewer
-prompt); dispatch it to evalops-worker (deepseek/deepseek-flash, cwd =
+Then STOP before phase 3 (vendor contract verification): it needs docker + LangSmith/Logfire/
+Databricks credentials — ask the maintainer. Also pending maintainer confirmation (HANDOFF §8):
+the WP2.4 fork-PR posture and the missing `evalops ci-adapters` envelope golden.
+
+Protocol for any new WP: write docs/packets/<WP>.md in the shape of docs/packets/WP3b.5.md (goal,
+fixed design decisions, falsifiable done-when, allowed/forbidden paths, commands, report format,
+reviewer prompt); dispatch it to evalops-worker (deepseek/deepseek-flash, cwd =
 /home/howt/work/evalops_universal/evalops); review the uncommitted tree with codex-luna-reviewer
 (openai-codex/gpt-6-luna, thinking xhigh; fallbacks: evalops-reviewer zai/glm-5.3-flash high, or
 evalops-reviewer-alt opencode-go/glm-5.3 — say which you used); loop on BLOCK; commit only after
 PASS as a feature commit + a separate docs commit; fetch/rebase before every commit; push and
-confirm with gh run list.
-
-Gates before every commit: make check, .venv/bin/python tests/run_without_pytest.py, make contract
-(skips offline), make schema zero drift, make capabilities and make ci-adapters zero diff, no
-unexpected golden churn. Never fabricate hashes, numbers, or evidence; undefined contract
-semantics are blockers — ask the maintainer. After WP3b.5: close G3b (every preset's default
-judges native + pinned + recorded; fallback only where declared) and tag v0.5.0. Phase 3 (vendor
-contract verification) needs docker + LangSmith/Logfire/Databricks credentials — ask the
-maintainer before starting it. Also pending maintainer confirmation (HANDOFF §8): the WP2.4
-fork-PR posture and the missing `evalops ci-adapters` envelope golden.
+confirm with gh run list. Gates before every commit: make check, .venv/bin/python
+tests/run_without_pytest.py, make contract (skips offline), make schema zero drift, make
+capabilities and make ci-adapters zero diff, no unexpected golden churn. Never fabricate hashes,
+numbers, or evidence; undefined contract semantics are blockers — ask the maintainer.
 ```
+

@@ -503,28 +503,38 @@ line (§4 rules apply unchanged; this is an additive §5 row, not an invariant c
 
 ## 6. Judge pinning
 
-D11 applies to every judge used in `plan`, `eval`, `calibrate`, and `gate`. The rules below are the
-normative target; **enforcement lands in WP3b.5** (gate refusal, resolved-model recording per
-verdict, nightly server-side settings check, calibration as a gate input). Until that WP ships, a
-rule is binding on new code but only enforced where a test exists.
+D11 applies to every judge used in `plan`, `eval`, `calibrate`, and `gate`. **Enforced since WP3b.5**
+(`e484552`): gate refusal, resolved-model recording per verdict, the nightly server-side settings
+check, and calibration as a gate input are all live; the bullets below state the enforced behavior.
 
 - The pin is `judges.<name>.model` in `evalops.yaml`. It must be a concrete model identifier.
   Defaults, aliases (`latest`, `-latest`, a project default), and empty values are not pins.
 - `judge_meta()` may **add** metadata (rubric, prompt version, sampling, cost) but must never
-  override the model or prompt version from config. A conflict is exit 2 at load.
-- Every verdict records the judge name, resolved model, and `judge_prompt_version` on the run. A
-  verdict without a resolved model is a contract violation. *(target: WP3b.5)*
-- An unpinned judge **fails the gate (exit 1)**; it is never a warning. Loading an unparseable pin
-  is exit 2. *(target: WP3b.5)*
+  override the model or prompt version from config: at `plan`/`eval`/`calibrate` (never at
+  `evalops judges`), a `judge_model` / `judge_prompt_version` metadata value that disagrees with
+  any declared spec is **exit 2 at load**, naming `judges.<name>.model` (resp. `.prompt_version`)
+  with both values.
+- Every verdict records the judge name, resolved model, and `judge_prompt_version` on the run:
+  `rows.jsonl` rows carry the additive `judge_models` field and the run params carry
+  `judge.<name>.model` / `judge.<name>.prompt_version` per declared spec. A verdict without a
+  resolved model is a contract violation (the judge-named exit 5 at write time).
+- An unpinned judge **fails the gate (exit 1)** with a `judge pin: <name>` check naming
+  `judges.<name>.model`; it is never a warning. Loading an unparseable pin is exit 2. A config with
+  no `judges:` section emits no check and is unchanged.
 - Judge changes ship separately from app changes, bump `judge_prompt_version`, and must pass
   `evalops calibrate` against human labels before gating. Calibration below
   `judges.<name>.min_agreement` / `min_kappa` **fails the `pipeline pr` / `pipeline main` stage**
   (the `calibrate` step exits 1 and the stage error names the judge, metric, required limit and
-  measured value — WP2.5); consuming calibration as an input of the `gate` command itself is
-  **WP3b.5**.
-- Server-side judge settings (Langfuse project defaults, pydantic-evals defaults) are re-checked in
-  the nightly job; drift fails nightly. A wrapper records the **resolved** model per verdict (R3).
-  *(target: WP3b.5)*
+  measured value — WP2.5), **and** the `gate` command consumes the judge's latest recorded
+  calibration evidence (runs tagged `evalops.kind: calibration`, latest by start time then run id)
+  against the config's limits: failing evidence is a failed `judge calibration: <name>` check
+  naming measured, required and the consumed run (WP3b.5). No evidence on record emits no check —
+  the gate consumes what exists, it does not demand what the pipeline deliberately skips.
+- Server-side judge settings (Langfuse project defaults, pydantic-evals defaults) are re-checked by
+  `evalops judges --check-settings` in the nightly job (after `baseline`, before the baseline
+  checkout); drift is exit 1, a missing SDK exit 6, evaluators without a settings surface report
+  `no-settings-surface`. A wrapper records the **resolved** model per verdict (R3, previous
+  bullet).
 - **A declared judge spec is validated at load (WP3b.1).** A `judges.<name>` block that carries any
   of `rubric`, `scale`, `prompt_version`, `sampling` declares a spec, and an unpinned or
   alias/default value is **exit 2 at load**, naming the dotted key (`judges.<name>.model`):
@@ -535,9 +545,10 @@ rule is binding on new code but only enforced where a test exists.
   config model at the exact key, `JudgeSpec.validate()` at the owning path), and neither layer may
   emit `Infinity`/`NaN` in an envelope. `evalops judges --json` reports the identity surface per
   spec (`rubric_hash`, never the rubric text) and the `unpinned` worklist. A block that declares no
-  spec (thresholds and/or `model` only) is unchanged by WP3b.1: **validating the pin for every
-  judge, and refusing a `judge_meta()` that disagrees with the config pin, remain WP3b.5.**
-  `unpinned` is therefore not an exhaustive list of unvalidated judges.
+  spec (thresholds and/or `model` only) is unchanged by WP3b.1; **since WP3b.5 the pin is validated
+  for every judge at gate time, and a `judge_meta()` identity that disagrees with a config pin is
+  exit 2 at load.** `unpinned` is the exhaustive list of rules without a concrete pin — the gate's
+  refusal list.
 - **Native judge adapters exist per evaluator (WP3b.2).** `scorers/native.py` declares exactly one
   adapter per evaluator backend (MLflow `make_judge` for `mlflow`, managed evaluators with
   server-side execution + score read-back for `langfuse`, openevals for `langsmith`, pydantic-evals
@@ -545,9 +556,9 @@ rule is binding on new code but only enforced where a test exists.
   function body and a missing SDK is `CapabilityError` → **exit 6** naming the pip package, as is
   asking an evaluator with no adapter (CONTRACT §3.0/§7.4); results normalize through `to_float`
   and a missing vendor score is `None`, never `0.0`. The vendor call shapes are `VERIFY`-marked
-  and resolved in phase 3. Nothing wires a declared spec into `plan`/`evaluate`/`calibrate` yet —
-  auto-selection (native where available, the LiteLLM rubric fallback where declared) is **WP3b.3**;
-  resolved-model recording per verdict and gate-time pin enforcement remain **WP3b.5**.
+  and resolved in phase 3. Since WP3b.3 a declared spec is wired into `plan`/`evaluate`/`calibrate`
+  by executor auto-selection (native where available, the LiteLLM rubric fallback where declared);
+  resolved-model recording per verdict and gate-time pin enforcement landed in **WP3b.5**.
 - **A declared spec resolves to a real scorer (WP3b.3).** `judges.<name>.judge` selects the
   executor: absent/`native` uses the evaluator's native adapter, `litellm` the evalops rubric
   fallback (`scorers/litellm_judge.py`, the only LiteLLM surface); the key is a closed set
@@ -572,7 +583,7 @@ rule is binding on new code but only enforced where a test exists.
   `None`; `name/panel_disagreement` is emitted whenever votes exist). They have **no** config
   surface and **no** run.py/gate wiring: they are composables an app hook returns, exactly like
   `span_judge`/`trajectory_judge`; their extra judge calls must be accounted in
-  `judge_meta().llm_judge_count`. Resolved-model recording and gate-time pin enforcement remain
+  `judge_meta().llm_judge_count`. Resolved-model recording and gate-time pin enforcement landed in
   **WP3b.5**.
 
 ## 7. Third-party plugin requirements
