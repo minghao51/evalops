@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from .util import CapabilityError, render
 
@@ -74,6 +74,10 @@ class Plugin:
 
     name = "base"
     provides: tuple[str, ...] = ()
+    self_tracing: ClassVar[bool] = False
+    """True when this evaluator traces rows natively and does NOT invoke the configured tracer for
+    row tracing (ADR 0008). Evaluators that wrap predict with the configured tracer (core-style)
+    leave this False."""
 
     def __init__(self, cfg, options: dict):
         self.cfg = cfg

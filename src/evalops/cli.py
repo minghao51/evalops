@@ -164,6 +164,33 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _self_tracing_warnings(cfg, report: dict, evaluator_plugin: Any) -> list[str]:
+    """The doctor warning for a legitimately wasted tracer role (ADR 0008, WP3.0 D1).
+
+    A warning, never a failure: an evaluator that classifies itself ``self_tracing`` traces its rows
+    natively, so a *different* configured tracer is never asked to trace them. ``self_tracing`` is
+    an explicit declaration on the plugin class, never inferred from ``provides``: declaring the
+    ``tracer`` role is not self-tracing -- the core evaluator declares it yet delegates to the
+    configured tracer (``tracer.wrap`` per row and ``run.py``'s usage backfill), so
+    ``evaluator: core`` + ``tracer: logfire`` must stay silent. Silence is also correct when the
+    two roles resolve to the same plugin: the *resolved* plugin names are compared, because the
+    config strings are aliases (``none`` and ``core`` are the same plugin). An evaluator that
+    failed to instantiate already reports its own failure, so it emits nothing here.
+    """
+    if "tracer" not in cfg.plugins or evaluator_plugin is None:
+        return []
+    if not getattr(evaluator_plugin, "self_tracing", False):
+        return []
+    evaluator = getattr(evaluator_plugin, "name", cfg.plugins["evaluator"])
+    tracer = (report.get("tracer") or {}).get("plugin") or cfg.plugins["tracer"]
+    if tracer == evaluator:
+        return []
+    return [
+        f"evaluator '{evaluator}' traces rows natively (self-tracing); the configured tracer '{tracer}' "
+        "is not used for row tracing — usage backfill may still query it for rows missing usage"
+    ]
+
+
 def dispatch(args, cfg) -> dict:
     from . import cost, gate, guard, run
     from . import datasets as ds_mod
@@ -210,12 +237,24 @@ def dispatch(args, cfg) -> dict:
         return {"summary": f"env '{cfg.env}'", "roles": roles, "available": available()}
     if args.cmd == "doctor":
         reg, report, ok = Registry(cfg), {}, True
+        evaluator_plugin = None
         for role in ROLES:
             try:
-                report[role] = reg.get(role).doctor()
+                plugin = reg.get(role)
+                report[role] = plugin.doctor()
+                if role == "evaluator":
+                    evaluator_plugin = plugin
             except Exception as e:  # noqa: BLE001
                 ok, report[role] = False, {"plugin": cfg.plugins[role], "ok": False, "error": str(e)}
-        return {"ok": ok, "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'", "roles": report}
+        data: dict[str, Any] = {
+            "ok": ok,
+            "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'",
+            "roles": report,
+        }
+        warnings = _self_tracing_warnings(cfg, report, evaluator_plugin)
+        if warnings:  # additive and conditional: absent (never ``[]``) when nothing is worth saying
+            data["warnings"] = warnings
+        return data
     if args.cmd == "guard":
         return guard.run_guard(cfg)
     if args.cmd == "pipeline":

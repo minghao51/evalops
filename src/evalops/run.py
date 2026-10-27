@@ -13,8 +13,9 @@ from . import cost, judges, locks
 from . import datasets as ds_mod
 from . import prompts as pr_mod
 from . import tools as tools_mod
+from . import usage as usage_mod
 from .contract import formats, redact
-from .ports import DatasetStore, Evaluator, Ledger, RowResult, Tracer
+from .ports import DatasetStore, Evaluator, Ledger, RowResult, Tracer, Usage
 from .registry import Registry
 from .scorers.judges import spec_judge
 from .scorers.native import adapters
@@ -250,6 +251,102 @@ def _capturing(predict_fn, limits, stash):
                 stash[canonical(inputs)] = cap.trace()
 
     return sync_wrapped
+
+
+def _stash_usage(collector, inputs, stash) -> None:
+    """Record one predict invocation's reported usage, then re-report it to any enclosing collector.
+
+    ``collector`` is the per-invocation collector :func:`_collecting` opened; only a collector that
+    actually saw an ``evalops.report_usage(...)`` call records anything. The re-report exists for an
+    evaluator that harvests app usage *itself* (the core evaluator opens its own collector around
+    each attempt): it receives exactly the numbers it would have received directly, so its per-row
+    usage -- and the scorer usage it merges onto it -- is unchanged. Outside such a collector this is
+    ``report_usage``'s documented no-op.
+    """
+    if collector is None or not collector.reported:
+        return
+    stash[canonical(inputs)] = Usage(collector.input_tokens, collector.output_tokens, collector.cost_usd)
+    usage_mod.report_usage(
+        input_tokens=collector.input_tokens, output_tokens=collector.output_tokens, cost_usd=collector.cost_usd
+    )
+
+
+def _collecting(fn, stash):
+    """Harvest ``evalops.report_usage(...)`` from predict calls for **every** evaluator (WP3.0 B).
+
+    The core evaluator reads app usage from a collector of its own; a vendor evaluator has no such
+    per-row collector, so the run layer supplies one here and records the totals in ``stash`` under
+    ``canonical(inputs)`` -- the same input-keyed trick :func:`_capturing` uses for traces. Only a
+    collector that reported records, so an app that never reports leaves the stash untouched.
+
+    Semantics, pinned by ``tests/unit/test_parity.py``:
+
+    * a retried call overwrites the earlier attempt (the last attempt wins, like core's ``caps[-1]``);
+    * rows with identical inputs share one key, so the **last** of them to run wins;
+    * the numbers are also re-reported to an enclosing collector (:func:`_stash_usage`), so the core
+      evaluator's own per-row collector keeps its exact values.
+
+    Composition with :func:`_capturing` is order-independent: the two wrap different concerns.
+    """
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_wrapped(**inputs):
+            collector = None
+            try:
+                with usage_mod.collect() as collector:
+                    return await fn(**inputs)
+            finally:
+                _stash_usage(collector, inputs, stash)
+
+        return async_wrapped
+
+    @functools.wraps(fn)
+    def sync_wrapped(**inputs):
+        collector = None
+        try:
+            with usage_mod.collect() as collector:
+                return fn(**inputs)
+        finally:
+            _stash_usage(collector, inputs, stash)
+
+    return sync_wrapped
+
+
+def _row_metrics(rows) -> dict[str, float]:
+    """The run layer's universal row metrics (WP3.0 A1): ``error_rate`` and ``budget_exceeded_rate``.
+
+    Computed from ``RowResult.error`` for **every** evaluator, after the rows' errors are final -- so
+    a native evaluator's trace scorers, which run in this module after ``evaluate`` returns, are
+    already accounted for. The formula is the core evaluator's, moved here verbatim (ADR 0008).
+    """
+    n = max(len(rows), 1)
+    return {
+        "error_rate": sum(1 for r in rows if r.error) / n,
+        "budget_exceeded_rate": sum(1 for r in rows if (r.error or "").startswith("budget_exceeded")) / n,
+    }
+
+
+def _backfill_usage(rows, tracer) -> None:
+    """One configured-tracer usage backfill per run, for every evaluator (WP3.0 C1).
+
+    This block used to live inside ``plugins/core.py::evaluate``; it belongs to the run layer so a
+    vendor evaluator gets the same chance. Rows whose normalized trace already carries tokens are
+    skipped (``cost.measure`` prices those from the trace instead), exactly the rows core asked
+    about. A lookup that finds nothing -- the wrong backend, an unreachable tracer -- leaves the row
+    missing: ``rows_missing_usage`` stays honest rather than inventing numbers.
+    """
+    missing = [
+        r.trace_id
+        for r in rows
+        if r.trace_id and r.usage is None and not (r.trace is not None and any(r.trace.tokens()))
+    ]
+    if not missing:
+        return
+    found = tracer.usage(missing)
+    for r in rows:
+        if r.usage is None and r.trace_id in found:
+            r.usage = found[r.trace_id]
 
 
 def _post_score(rows, scorers):
@@ -489,9 +586,14 @@ def _evaluate(
                 pending.append((name, _put_artifact(cfg, artifacts, name, body)))
 
             stash: dict = {}
+            # WP3.0 B: the app-reported-usage stash, one per run. Kept apart from the trace stash
+            # above on purpose -- the two hold different objects under the same inputs key.
+            usage_stash: dict = {}
             fn = predict_fn
-            if native and predict_fn is not None:
-                fn = _capturing(predict_fn, limits, stash)
+            if fn is not None:
+                if native:
+                    fn = _capturing(fn, limits, stash)
+                fn = _collecting(fn, usage_stash)
             with tools_mod.use(cassette):
                 result = evaluator.evaluate(
                     records=records,
@@ -513,6 +615,20 @@ def _evaluate(
                         r.trace_metrics = r.trace.metrics()
                 _post_score(result.rows, trace_scorers)
                 result.metrics = {**result.metrics, **aggregate_rows(result.rows)}
+
+            # WP3.0 A1: the run layer owns these two metrics, unconditionally, for every evaluator.
+            # Emitted here -- after the native trace-attach/`_post_score` block above -- so the row
+            # errors they read are final (a trace scorer's failure counts).
+            result.metrics = {**result.metrics, **_row_metrics(result.rows)}
+
+            # WP3.0 B2: fill the usage the app reported during predict where the evaluator's own
+            # collector did not (core fills every row it ran, so this never clobbers it), then give
+            # the configured tracer one chance to backfill the rest. Both happen before
+            # `cost.measure`/artifact staging so `rows_missing_usage` and the rows artifact are true.
+            for r in result.rows:
+                if r.usage is None:
+                    r.usage = usage_stash.get(canonical(r.inputs))
+            _backfill_usage(result.rows, tracer)
 
             # WP3b.5 C3: stamp the resolved identity of each declared spec per verdict (both the
             # native-scorer path and the `_post_score` trace-scorer path converge here), then enforce

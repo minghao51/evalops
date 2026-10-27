@@ -230,19 +230,6 @@ class CorePlugin(Plugin, Tracer, Evaluator):
                 rows = list(pool.map(run_row, enumerate(records)))
         tracer.flush()
 
-        missing = [
-            r.trace_id
-            for r in rows
-            if r.trace_id and r.usage is None and not (r.trace is not None and any(r.trace.tokens()))
-        ]
-        if missing:
-            found = tracer.usage(missing)
-            for r in rows:
-                if r.usage is None and r.trace_id in found:
-                    r.usage = found[r.trace_id]
-        metrics = aggregate_rows(rows)
-        metrics["error_rate"] = sum(1 for r in rows if r.error) / max(len(rows), 1)
-        metrics["budget_exceeded_rate"] = sum(1 for r in rows if (r.error or "").startswith("budget_exceeded")) / max(
-            len(rows), 1
-        )
-        return EvalResult(rows=rows, metrics=metrics)
+        # `error_rate`/`budget_exceeded_rate` used to be emitted here; they are the run layer's
+        # metrics now, for **every** evaluator (ADR 0008, WP3.0 A1), so core keeps no private copy.
+        return EvalResult(rows=rows, metrics=aggregate_rows(rows))
