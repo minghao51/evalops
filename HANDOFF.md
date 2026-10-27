@@ -17,13 +17,13 @@ backlog. The completed `docs/packets/WP3b.5.md` / `WP-PAR.md` are the newest pac
 | | |
 |---|---|
 | Verified base | `e484552` (WP3b.5) + G3b close docs — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
-| Tests | 482 offline (`make check`), standalone 482/482, 1 Postgres contract test (excluded) |
+| Tests | 503 offline (`make check`), standalone 503/503, 1 Postgres contract test (excluded) |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
 | Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
 | Phase 3b | **closed at G3b, tagged `v0.5.0`** — 3b.1 `173a416`, 3b.2 `c2beda5`, 3b.3 `f8668fe`, 3b.4 `59518c2`, 3b.5 `e484552` |
 | Phase 3 | **started**: WP3.0 (parity, ADR 0008) + WP3.1a (mlflow+postgres contract slice) packets ready; langsmith/databricks keys are backlog. Live e2e platform (mlflow+postgres+logfire) runs outside the repo; findings banked for 3.2 |
 | Tree | clean; no uncommitted work |
-| Next artifact | dispatch `docs/packets/WP-PAR.md` → evalops-worker, then `docs/packets/WP3.1a.md` after PAR lands |
+| Next artifact | dispatch `docs/packets/WP3.1a.md` (mlflow+postgres contract slice) — PAR landed at `dc617ee` |
 | Gate ahead | **G3**: every VERIFY asserted-green or beta-with-hint; lineage on ≥2 backends. Needs langsmith/databricks keys eventually — Logfire live, docker available |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase

@@ -122,12 +122,13 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
    identity that disagrees with a declared spec is exit 2 at load. Numeric validation stays
    two-layered by design (config model at the exact key, `JudgeSpec.validate()` at the owning
    path); both are exit 2 and neither can emit `Infinity`/`NaN` in an envelope.
-18. **Evaluator parity gaps (observed live 2026-10-27, being closed by WP3.0/ADR 0008).** Only the
-   core evaluator emits `error_rate`/`budget_exceeded_rate`, harvests `evalops.report_usage`, and
-   calls the configured tracer for row tracing/backfill; the mlflow evaluator self-traces and a
-   separately configured tracer plugin is silently unused. The mlflow preset's `error_rate` gate is
-   therefore untruthful on its own evaluator until WP3.0 lands. Recorded from the live e2e
-   platform run (dockerized mlflow+postgres, Logfire project `evalops-contract`).
+18. **Evaluator parity gaps (observed live 2026-10-27; RESOLVED by WP3.0/ADR 0008, `dc617ee`).**
+   `error_rate`/`budget_exceeded_rate` are computed in the run layer for every evaluator,
+   `evalops.report_usage` is harvested under every evaluator (inputs-keyed stash, last attempt
+   wins), the configured tracer's usage backfill runs once per run from the run layer, and doctor
+   warns (via the `self_tracing` ClassVar, not `provides`) when a self-tracing evaluator is paired
+   with a different configured tracer — truthful about the backfill, which still queries the
+   configured tracer. Langfuse/langsmith set `self_tracing` in their own contract slices.
 
 ## How to work in this repo
 
