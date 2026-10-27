@@ -19,8 +19,9 @@ and `default_env` (WP0.5c D2) and never raise on a recursive alias or a non-stri
 amount cannot hide a type regression, (n) an ``--config`` value that happens to spell a sub-command
 name is consumed as a value, so `--config rollback ... --version` is still the top-level flag
 (WP0.5d D3), (o) the new ``judges`` command (WP3b.1) has an *additive* golden of its own: one
-full judge spec and one threshold-only rule, so both list branches are pinned and no rubric prose
-is emitted.
+full judge spec plus a threshold-only rule and two model-only rules (a pinned one that appears in
+neither list and an alias that joins the exhaustive ``unpinned`` worklist, WP3b.5 E4), so both list
+branches are pinned and no rubric prose is emitted.
 
 Every test is a zero-argument function: ``python tests/run_without_pytest.py`` runs this module too.
 Regenerate the goldens (review the diff!) with ``EVALOPS_UPDATE_GOLDENS=1 pytest -q -k goldens``.
@@ -188,9 +189,13 @@ def build_predict_fn(prompts):
 NOISY_CONFIG = CONFIG.replace("predict_fn: fake_app:build_predict_fn", "predict_fn: noisy_app:build_predict_fn")
 
 # WP3b.1: `evalops judges` gets its own additive golden (a *new* command after the envelope
-# freeze). The project declares one full spec and one threshold-only rule, so both list branches of
-# `payload()` appear (a spec identity and the `unpinned` worklist) and the rubric text is provably
-# absent: only its length and its 12-hex identity are emitted.
+# freeze). The project declares one full spec plus three non-spec rules, so both list branches of
+# `payload()` appear (a spec identity and the exhaustive `unpinned` worklist) and the rubric text is
+# provably absent: only its length and its 12-hex identity are emitted. WP3b.5 E4 extends it with a
+# **model-only** rule: `traced` carries a concrete pin (it appears in neither list -- a lone pin
+# declares no spec and needs no refusal) and `aliased` carries an alias (`*-latest`), so the golden
+# pins the exhaustive worklist's new semantics: before this WP it appeared nowhere, now it is on
+# `unpinned`.
 JUDGES_RUBRIC = """Score 1.0 when every claim matches the retrieved context; 0.0 otherwise.
 Penalize invented citations at most harshly.
 """
@@ -205,6 +210,8 @@ JUDGES_CONFIG = (
     + "    scale: {kind: binary, min: 0.0, max: 1.0}\n"
     + "    sampling: {temperature: 0.0, max_tokens: 256, seed: 7}\n"
     + "  helpful: {min_agreement: 0.85, min_kappa: 0.6}\n"
+    + "  traced: {model: fake-judge-2024-11-20}\n"
+    + "  aliased: {model: fake-judge-latest}\n"
 )
 
 # WP1.2: a ledger plugin that keeps the non-abstract port defaults (`migrate`/`verify` raise

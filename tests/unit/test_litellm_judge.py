@@ -73,7 +73,7 @@ RUBRIC = "Give 1 when the reply refunds the order and 0 otherwise; judge only th
 LITELLM_JUDGE = """
 judges:
   correctness:
-    model: fake-judge-2024-11-20
+    model: fake-judge@1
     rubric: |
       Give 1 when the reply answers the question in the knowledge base and 0 otherwise.
     prompt_version: "1"
@@ -619,7 +619,7 @@ def test_h5_judge_usage_without_app_usage_leaves_the_cost_unset():
 TWO_LITELLM_JUDGES = (
     LITELLM_JUDGE
     + """  helpfulness:
-    model: fake-judge-2024-11-20
+    model: fake-judge@1
     rubric: |
       Give 1 when the reply is polite and 0 otherwise.
     prompt_version: "1"
@@ -727,7 +727,7 @@ def test_a_declared_spec_becomes_a_real_metric_in_evaluate_with_either_executor(
         # the fallback ran once per row and its score reached the aggregate as `correctness/mean`
         assert metrics["correctness/mean"] == 1.0, metrics
         assert len(state.calls) == 1, state.calls
-        assert state.calls[0]["model"] == "fake-judge-2024-11-20"
+        assert state.calls[0]["model"] == "fake-judge@1"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -739,7 +739,7 @@ def test_a_declared_spec_becomes_a_real_metric_in_evaluate_with_either_executor(
             code, envelope = proj.run_cli_in_process(root, "eval", "--dataset", "smoke", "--stage", "dev")
         assert code == 0, envelope
         assert _metrics(root)["correctness/mean"] == 0.25, _metrics(root)
-        assert state["calls"][0]["model"] == "fake-judge-2024-11-20"
+        assert state["calls"][0]["model"] == "fake-judge@1"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

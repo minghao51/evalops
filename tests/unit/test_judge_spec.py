@@ -353,8 +353,9 @@ def test_the_judge_key_selects_an_executor_and_never_declares_a_spec():
     cfg = _cfg(rules)
     assert judges_mod.specs(cfg) == {name: None for name in sorted(rules)}
     assert judges_mod.load(cfg) == {}
-    # `unpinned` is the threshold worklist, exactly as before: an executor choice does not join it
-    assert judges_mod.payload(cfg) == {"judges": [], "unpinned": ["correctness"]}
+    # `unpinned` is the pin worklist (WP3b.5 E1): a rule with no concrete `model` is listed, while
+    # an executor choice alone still never declares a spec
+    assert judges_mod.payload(cfg) == {"judges": [], "unpinned": ["correctness", "litellm_only", "native_only"]}
 
 
 def test_the_generated_schema_exposes_judge_as_a_closed_enum():
@@ -379,7 +380,9 @@ def test_threshold_only_rules_declare_no_spec():
     assert judges_mod.specs(cfg) == {name: None for name in sorted(rules)}
     assert judges_mod.load(cfg) == {}
     payload = judges_mod.payload(cfg)
-    assert payload == {"judges": [], "unpinned": ["correctness", "trajectory_quality"]}
+    # WP3b.5 (E1): the worklist is every rule without a concrete pin, so the empty rule and the
+    # threshold-only rules are listed; `pinned_but_unspecified` has a concrete model and is not.
+    assert payload == {"judges": [], "unpinned": ["bare", "correctness", "trajectory_quality"]}
 
 
 def test_the_shipped_evalops_yaml_declares_no_spec():

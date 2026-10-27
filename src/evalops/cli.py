@@ -135,7 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("baseline", help="show the current production baseline (git sha, group)")
     sub.add_parser("cost", help="month-to-date eval spend vs budget")
-    sub.add_parser("judges", help="declared judge specs (pinned model, rubric identity) and the unpinned worklist")
+    jd = sub.add_parser("judges", help="declared judge specs (pinned model, rubric identity) and the unpinned worklist")
+    jd.add_argument(
+        "--check-settings",
+        action="store_true",
+        help="compare each declared pin with the backend's server-side default judge model",
+    )
 
     cf = sub.add_parser("config", help="validate, print the JSON Schema of, or explain evalops.yaml")
     cfsub = cf.add_subparsers(dest="config_action", required=True)
@@ -274,6 +279,11 @@ def dispatch(args, cfg) -> dict:
     if args.cmd == "judges":
         from . import judges as judges_mod
 
+        if args.check_settings:
+            # F2 (WP3b.5): drift is exit 1 with the fixed payload in `data`; a missing SDK is the
+            # reader's CapabilityError (exit 6, naming the pip package). The plain listing below is
+            # unchanged and stays byte-identical.
+            return judges_mod.settings_check(cfg)
         # A declared but invalid spec is exit 2 here too (same load-time rejection as plan/eval).
         data = judges_mod.payload(cfg)
         if not args.json:  # human output is free-form (CONTRACT §2)

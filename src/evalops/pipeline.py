@@ -239,6 +239,10 @@ def _plan_release(ctx: _Context) -> Generator[_Step, None, None]:
 
 def _plan_nightly(ctx: _Context) -> Generator[_Step, None, None]:
     yield _ev("baseline", ["baseline"], writes_baseline=True)
+    # WP3b.5 F3: compare the working tree's declared pins with the backend's server-side default
+    # judge model *before* the baseline checkout, so the check sees this config and these
+    # credentials; drift exits 1 and stops the stage (no undo is needed: nothing was changed).
+    yield _ev("judge-settings", ["judges", "--check-settings"])
     sha = BASELINE_PLACEHOLDER if ctx.dry_run else ctx.baseline_sha
     control = ["eval", "--dataset", ctx.golden, "--stage", "control"]
     if not ctx.dry_run and not sha:

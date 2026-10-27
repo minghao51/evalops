@@ -17,13 +17,13 @@ What a rule declares (the discriminator, packet A2)
 * **calibration thresholds only** -- ``min_agreement`` / ``min_kappa`` / ``max_mae`` / ``label`` /
   ``threshold`` (and/or ``model``). That is the shipped ``evalops.yaml`` shape and it declares *no*
   spec: :func:`specs` yields ``None`` for it, :func:`load` omits it, and behaviour is byte-identical
-  to before. Those names are reported under ``payload()["unpinned"]``: the WP3b.5 worklist, surfaced
-  early instead of inferred here.
+  to before.
 
-A rule that names only ``model`` is deliberately *not* a spec either (packet A2 names it), and it is
-not on the ``unpinned`` worklist either (A4 defines that list as the rules that carry calibration
-thresholds): a lone pin with no rubric is a no-op key today and is the pin WP3b.5 validates for
-*every* judge. Neither list silently pretends it was validated.
+A rule that names only ``model`` is deliberately *not* a spec either (packet A2 names it): a lone pin
+with no rubric declares no judge to validate and stays a no-op key. The pin itself is still
+validated -- by the gate, for **every** rule (WP3b.5): ``payload()["unpinned"]`` is the exhaustive
+list of rules whose ``model`` fails :func:`is_pinned_model`, so the worklist is exactly the gate's
+refusal list and a reviewer can read the same names the gate will report.
 
 Two numeric validation layers, both exit 2
 ------------------------------------------
@@ -56,8 +56,16 @@ only a *declared* spec can select an executor. An unknown value is exit 2 at
 ``judges.<name>.judge`` (the config model at the exact key, :meth:`JudgeSpec.validate` at the dotted
 path), never a silent default.
 
-Global "every judge must be pinned" enforcement is **WP3b.5** (gate refusal, resolved-model
-recording per verdict); this module only makes a *declared* spec validatable and load-rejected.
+Global "every judge must be pinned" enforcement is landed (WP3b.5): :func:`run_gate` refuses every
+rule whose ``model`` is not a concrete pin (exit 1), :func:`conflicts_with_meta` keeps
+``judge_meta()`` from overriding a declared spec's pin (exit 2 at load), and
+:func:`settings_check` compares a declared pin with the backend's server-side default judge model.
+This module still owns the *declared* spec's load-time validation and is the single source of the
+pin rule :func:`is_pinned_model`.
+
+Why ``judge_meta()`` may add but never override (WP3b.5 B4): with a declared spec the judge identity
+is config-owned and is recorded per verdict, so a disagreeing run-level metadata value would
+contradict that record on the same run. Equal values are fine -- metadata may *add*.
 
 No vendor import lives here (decision D4): a model id is recorded, never resolved.
 """
@@ -71,7 +79,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, NoReturn, TextIO, cast
 
-from .util import EXIT_USAGE, EvalOpsError, sha256
+from .util import EXIT_GATE_FAILED, EXIT_USAGE, EvalOpsError, sha256
 
 #: The scale kinds a spec may declare (packet A1/A3). ``binary`` is fixed to ``(0.0, 1.0)``.
 SCALE_KINDS: tuple[str, ...] = ("binary", "ordinal", "continuous")
@@ -360,6 +368,118 @@ def _sampling_from(name: str, raw: Any) -> Sampling:
     )
 
 
+#: The only ``judge_meta()`` keys that carry judge identity (WP3b.5 B1); anything else is app
+#: metadata and is never compared with a declared spec.
+IDENTITY_META: tuple[tuple[str, str], ...] = (("judge_model", "model"), ("judge_prompt_version", "prompt_version"))
+
+
+def conflicts_with_meta(cfg: Any, meta: Mapping[str, Any]) -> None:
+    """Reject a ``judge_meta()`` identity that disagrees with a declared spec (WP3b.5 B1/B2).
+
+    ``judge_meta()`` may *add* metadata (rubric, sampling, cost), but the model and the prompt
+    version of a declared spec are config-owned: with a spec, that identity is what this WP records
+    per verdict, so a disagreeing run-level value would contradict the record on the same run. Only
+    :data:`IDENTITY_META` is compared; every other key is app metadata.
+
+    Exact string equality is the rule -- a non-string or empty meta value equals nothing and is a
+    conflict. Specifications are checked in sorted name order, ``judge_model`` before
+    ``judge_prompt_version``, so a config with several bad values always reports the same one. No
+    declared spec, no identity key in ``meta``, or full agreement is a no-op. Raises
+    :class:`EvalOpsError` (exit 2) naming ``judges.<name>.model`` / ``.prompt_version`` with both
+    values.
+    """
+    if not meta:
+        return
+    declared = load(cfg)
+    if not declared:
+        return
+    for meta_key, identity_field in IDENTITY_META:
+        if meta_key not in meta:
+            continue
+        wanted = meta[meta_key]
+        for name in sorted(declared):
+            pinned = getattr(declared[name], identity_field)
+            if isinstance(wanted, str) and wanted == pinned:
+                continue
+            path = f"judges.{name}.{identity_field}"
+            message = (
+                f"the config pin is {pinned!r} but judge_meta() reports {meta_key}={wanted!r}; "
+                "judge_meta() may add metadata but must never override the config pin (CONTRACT §6)"
+            )
+            raise EvalOpsError(
+                f"{path}: {message}",
+                EXIT_USAGE,
+                {
+                    "errors": [{"path": path, "message": message}],
+                    "meta_key": meta_key,
+                    "config": pinned,
+                    "meta": wanted,
+                },
+            )
+
+
+class _SettingsDrift(EvalOpsError):
+    """Exit 1 whose envelope ``data`` is the ``--check-settings`` payload (the CLI copies it)."""
+
+    def __init__(self, message: str, data: dict[str, Any]):
+        super().__init__(message, EXIT_GATE_FAILED)
+        self.data = data
+
+
+def settings_check(cfg: Any) -> dict[str, Any]:
+    """Compare each declared spec's pin with its backend's server-side default judge model (F2).
+
+    The evaluator of a declared spec is the evaluator that runs it: the configured ``evaluator``
+    plugin for a ``native`` spec, and ``litellm`` -- the evalops-owned rubric fallback, whose model
+    is sent on every call rather than configured server-side -- for a ``litellm`` spec. Evaluators
+    with a settings reader compare their server default with ``spec.model``; the rest (mlflow,
+    langsmith, litellm in this WP) are reported as ``no-settings-surface`` instead of hidden, so a
+    phase-3 gap is visible.
+
+    Returns the fixed ``--check-settings`` payload: ``{"evaluators": [...], "drifted": bool}``,
+    evaluators and their judges sorted by name. Drift raises :class:`EvalOpsError`
+    (``EXIT_GATE_FAILED``, exit 1) whose ``data`` is that same payload and whose message names the
+    config model and the server default, so the nightly stage's error is actionable. A missing SDK
+    is the reader's ``CapabilityError`` (exit 6, naming the pip package). The readers themselves
+    live beside the adapters in :mod:`evalops.scorers.native` (``SETTINGS_READERS``) and are
+    imported lazily here, because that module imports this one.
+    """
+    from .scorers.native import SETTINGS_READERS  # lazy: scorers.native imports this module
+
+    evaluator = cfg.plugins.get("evaluator", "core")
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for name, spec in load(cfg).items():
+        surface = "litellm" if spec.judge == "litellm" else evaluator
+        groups.setdefault(surface, []).append({"name": name, "config_model": spec.model, "server_default": None})
+    for surface, entries in groups.items():
+        reader = SETTINGS_READERS.get(surface)
+        for entry in sorted(entries, key=lambda e: str(e["name"])):
+            entry["server_default"] = reader() if reader is not None else None
+    evaluators: list[dict[str, Any]] = []
+    for surface in sorted(groups):
+        entries = sorted(groups[surface], key=lambda e: str(e["name"]))
+        if surface not in SETTINGS_READERS:
+            status = "no-settings-surface"
+        elif any(entry["server_default"] != entry["config_model"] for entry in entries):
+            status = "drift"
+        else:
+            status = "ok"
+        evaluators.append({"evaluator": surface, "status": status, "judges": entries})
+    drifted = any(entry["status"] == "drift" for entry in evaluators)
+    data: dict[str, Any] = {"evaluators": evaluators, "drifted": drifted}
+    if drifted:
+        findings = [
+            f"judges.{judge['name']}.model is {judge['config_model']!r} but the server default is "
+            f"{judge['server_default']!r}"
+            for entry in evaluators
+            if entry["status"] == "drift"
+            for judge in entry["judges"]
+            if judge["server_default"] != judge["config_model"]
+        ]
+        raise _SettingsDrift("judge settings drifted: " + "; ".join(findings), data)
+    return data
+
+
 def declares_spec(rule: Mapping[str, Any]) -> bool:
     """True iff the rule declares a spec: at least one of :data:`SPEC_KEYS` is present.
 
@@ -370,7 +490,7 @@ def declares_spec(rule: Mapping[str, Any]) -> bool:
 
 
 def carries_threshold(rule: Mapping[str, Any]) -> bool:
-    """True iff the rule carries a calibration threshold but no spec -- the 3b.5 worklist."""
+    """True iff the rule carries a calibration threshold (a ``judges`` rule shape, not a spec)."""
     return any(key in rule for key in THRESHOLD_KEYS)
 
 
@@ -398,19 +518,19 @@ def load(cfg: Any) -> dict[str, JudgeSpec]:
 
 
 def payload(cfg: Any) -> dict[str, Any]:
-    """The deterministic ``--json`` payload of ``evalops judges`` (packet A4/D1).
+    """The deterministic ``--json`` payload of ``evalops judges`` (packet A4, WP3b.5 E1).
 
     ``judges`` is sorted by name and carries a spec's identity plus ``rubric_chars``/``rubric_hash``:
     the rubric text is never emitted (reviewers and CI logs get a stable identity, not prose).
-    ``unpinned`` is the sorted list of rules that carry calibration thresholds but declare no spec.
+    ``unpinned`` is the exhaustive, sorted list of every rule whose ``model`` fails
+    :func:`is_pinned_model` -- threshold-only, model-only and empty rules alike (STATE compromise 17
+    is resolved by this WP). Declared specs never appear: their pins were validated at load.
     """
     declared = specs(cfg)
     rules: Mapping[str, Any] = cfg.section("judges") or {}
     return {
         "judges": [spec.payload() for spec in declared.values() if spec is not None],
-        "unpinned": sorted(
-            name for name, spec in declared.items() if spec is None and carries_threshold(rules.get(name) or {})
-        ),
+        "unpinned": sorted(name for name, rule in rules.items() if not is_pinned_model((rule or {}).get("model"))),
     }
 
 
@@ -425,7 +545,7 @@ def write_human(data: Mapping[str, Any], stream: TextIO | None = None) -> None:
         )
     for name in data["unpinned"]:
         out.write(
-            f"warning: judges.{name} has calibration thresholds but declares no spec (unpinned); "
-            "add rubric, prompt_version, scale/sampling and a concrete model\n"
+            f"warning: judges.{name} is unpinned; gate refuses it (exit 1) — "
+            f"set judges.{name}.model to a concrete model\n"
         )
     out.flush()

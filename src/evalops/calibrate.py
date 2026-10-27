@@ -57,6 +57,11 @@ def calibrate(cfg, dataset, scorers=None, allow_dirty=False) -> dict:
     names = scorers or list(rules)
     if not names:
         raise EvalOpsError("no judges to calibrate: add a `judges:` section or pass --scorer", EXIT_USAGE)
+    # WP3b.5 B3: the third load point (`plan`, `evaluate`, `calibrate`). A `judge_meta()` identity
+    # that disagrees with a declared spec is exit 2 before the calibration run is recorded (the
+    # no-judges error above is unchanged, so the hook is not called on that path).
+    meta = cfg.hook("judge_meta")()
+    judges.conflicts_with_meta(cfg, meta)
     out = evaluate(
         cfg,
         dataset,
@@ -116,5 +121,5 @@ def calibrate(cfg, dataset, scorers=None, allow_dirty=False) -> dict:
         "checks": checks,
         "group": out["group"],
         "report": str(report),
-        "judge_meta": json.dumps(cfg.hook("judge_meta")()),
+        "judge_meta": json.dumps(meta),
     }

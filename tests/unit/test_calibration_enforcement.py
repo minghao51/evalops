@@ -52,9 +52,9 @@ AGREEING = "".join(
     )
 )
 
-FAILING_AGREEMENT = "\njudges:\n  helpful: {min_agreement: 0.99}\n"
-FAILING_KAPPA = "\njudges:\n  helpful: {min_kappa: 0.9}\n"
-PASSING = "\njudges:\n  helpful: {min_agreement: 0.8}\n"
+FAILING_AGREEMENT = "\njudges:\n  helpful: {min_agreement: 0.99, model: fake-judge@1}\n"
+FAILING_KAPPA = "\njudges:\n  helpful: {min_kappa: 0.9, model: fake-judge@1}\n"
+PASSING = "\njudges:\n  helpful: {min_agreement: 0.8, model: fake-judge@1}\n"
 #: A gate that cannot pass: the smoke run's `facts/mean` is below 1.5.
 TIGHT_GATE = '\ngates:\n  metrics:\n    "facts/mean": {min: 1.5}\n'
 MESSAGE_PREFIX = "pipeline {stage} step '{step}' failed with exit code {code}"

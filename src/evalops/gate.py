@@ -637,6 +637,110 @@ def report_md(
     return "\n".join(lines) + "\n"
 
 
+# ---------------- judge pinning + calibration evidence (WP3b.5 A/D) ----------------
+#: The configured calibration limits a judge rule may carry, the recorded metric each one reads and
+#: the direction it is compared in (exactly what `calibrate.py` writes as `judge.<name>.<stat>`).
+CALIBRATION_LIMITS: tuple[tuple[str, str, str], ...] = (
+    ("min_agreement", "agreement", ">="),
+    ("min_kappa", "kappa", ">="),
+    ("max_mae", "mae", "<="),
+)
+
+
+def _judge_rules(cfg) -> dict:
+    """The `judges` section as configured (the gate must not assume `judges.load` ran)."""
+    return cfg.section("judges") or {}
+
+
+def judge_pin_checks(cfg) -> list[dict]:
+    """One failed check per `judges.<name>` rule without a concrete pin (WP3b.5 A1/A2).
+
+    The gate is the single enforcement point, so it checks **every** rule shape: a declared spec
+    (already load-rejected when unpinned, but `gate` never assumes a loader ran), a threshold-only
+    rule and a model-only rule. A rule with a concrete pin produces no check, and a project without
+    a `judges` section produces no check at all -- so the gate envelope of such a project stays
+    byte-identical.
+    """
+    from . import judges
+
+    checks: list[dict] = []
+    for name in sorted(_judge_rules(cfg)):
+        rule = _judge_rules(cfg)[name] or {}
+        model = rule.get("model")
+        if judges.is_pinned_model(model):
+            continue
+        offending = "missing" if model is None else repr(model)
+        checks.append(
+            {
+                "check": f"judge pin: {name}",
+                "passed": False,
+                "reason": (
+                    f"judges.{name}.model is {offending}; an unpinned judge fails the gate (exit 1): "
+                    f"set judges.{name}.model to a concrete model identifier"
+                ),
+            }
+        )
+    return checks
+
+
+def _latest_calibration_run(ledger, name: str):
+    """The judge's latest calibration run with recorded metrics, by `(start_ms, run_id)` (D1).
+
+    `find_runs` already returns newest-first, but the tiebreak is re-applied here so the evidence a
+    gate consumed is deterministic (and names the run in the check detail) regardless of a plugin's
+    ordering. A run with no `judge.<name>.<stat>` metric is not evidence for that judge.
+    """
+    latest = None
+    key = None
+    prefix = f"judge.{name}."
+    for run in ledger.find_runs(tags={"evalops.kind": "calibration"}):
+        metrics = run.metrics or {}
+        if not any(metric.startswith(prefix) for metric in metrics):
+            continue
+        candidate = (int(getattr(run, "start_ms", 0) or 0), str(run.run_id))
+        if key is None or candidate > key:
+            latest, key = run, candidate
+    return latest
+
+
+def calibration_checks(cfg, ledger) -> list[dict]:
+    """Re-check the *config's* limits against the judge's latest recorded calibration run (D2).
+
+    Only a rule carrying at least one of `min_agreement`/`min_kappa`/`max_mae` is consulted, and
+    each configured limit emits one check named `judge calibration: <name>` whose detail is
+    `{candidate, required, calibration_run}`. Failing evidence -- a `evalops.calibration: failed`
+    tag, a limit violated, or a metric the configured limit needs is missing -- is a failed check,
+    so the gate exits 1. No calibration run for the judge means **no check** (WP3b.5 D3, STATE
+    compromise 14: the pipeline's calibrate step is a deliberate skip when the dataset is absent,
+    and the gate consumes what exists instead of demanding what is deliberately skipped).
+    """
+    checks: list[dict] = []
+    for name in sorted(_judge_rules(cfg)):
+        rule = _judge_rules(cfg)[name] or {}
+        limits = [(limit, stat, op) for limit, stat, op in CALIBRATION_LIMITS if rule.get(limit) is not None]
+        if not limits:
+            continue
+        run = _latest_calibration_run(ledger, name)
+        if run is None:
+            continue
+        failed_tag = str((run.tags or {}).get("evalops.calibration") or "") == "failed"
+        for limit, stat, op in limits:
+            required = rule[limit]
+            raw = (run.metrics or {}).get(f"judge.{name}.{stat}")
+            measured = raw if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+            ok = measured is not None and (measured >= required if op == ">=" else measured <= required)
+            checks.append(
+                {
+                    "check": f"judge calibration: {name}",
+                    "passed": bool(ok) and not failed_tag,
+                    "candidate": measured,
+                    "required": required,
+                    "calibration_run": run.run_id,
+                }
+            )
+    return checks
+
+
 def run_gate(cfg, group=None, label="gate") -> dict:
     last_path = locks.scratch(cfg, "last_eval.json")
     last = formats.read_versioned(last_path) if last_path.exists() else {}
@@ -658,6 +762,13 @@ def run_gate(cfg, group=None, label="gate") -> dict:
     base = aggregate([r.metrics for r in base_group_runs]) if base_group else None
     rules = cfg.section("gates")
     passed, checks = check(cand, base, rules)
+    # WP3b.5 A/D: judge pin enforcement and recorded calibration evidence. Both are additions to
+    # the existing `checks` list (no new `data` key), and both are empty -- hence byte-identical --
+    # for a project without a `judges` section.
+    judge_checks = judge_pin_checks(cfg) + calibration_checks(cfg, ledger)
+    if judge_checks:
+        checks += judge_checks
+        passed = passed and all(x["passed"] for x in judge_checks)
     baseline = baseline_info(base_run)
     # Rows are read for the row rules and, with a baseline present, for paired drift. Without either
     # the gate keeps its previous no-artifact behaviour (a missing rows artifact is still skipped).

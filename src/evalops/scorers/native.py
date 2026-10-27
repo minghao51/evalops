@@ -374,3 +374,74 @@ _FACTORIES: dict[str, Callable[[JudgeSpec, NativeJudge], JudgeFn]] = {
     "openevals": _openevals_judge,
     "pydantic-evals": _pydantic_evals_judge,
 }
+
+
+# ---------------------------------------------------------------------------
+# server-side settings surfaces (WP3b.5 F1)
+# ---------------------------------------------------------------------------
+#: evaluator -> reader of its server-side **default judge model**. An evaluator absent from this
+#: table has no settings surface yet (mlflow, langsmith: phase 3), which ``judges --check-settings``
+#: reports as ``no-settings-surface`` rather than hiding. Insertion order is not contractual;
+#: callers sort. ``litellm`` is absent by design: the evalops fallback sends its pin on every call,
+#: so it has no server-side default to drift from.
+#: evaluator -> reader of its server-side **default judge model**. An evaluator absent from this
+#: table has no settings surface yet (mlflow, langsmith: phase 3), which ``judges --check-settings``
+#: reports as ``no-settings-surface`` rather than hiding. Insertion order is not contractual;
+#: callers sort. ``litellm`` is absent by design: the evalops fallback sends its pin on every call,
+#: so it has no server-side default to drift from.
+
+
+def _settings_unavailable(evaluator: str, package: str) -> CapabilityError:
+    """Exit 6 for a missing settings SDK: the operation names the surface, the hint the pip package."""
+    return CapabilityError(evaluator, "server-side judge settings", hint=f"pip install {package}")
+
+
+def _default_model(value: Any) -> str:
+    """The model string a vendor setting names: a plain string, or an object with ``.name``/``.value``."""
+    if isinstance(value, str):
+        return value
+    name = getattr(value, "name", None) or getattr(value, "value", None)
+    return str(name) if name else str(value)
+
+
+def langfuse_default_judge_model() -> str:
+    """Langfuse's project default judge model, read from the public API (CONTRACT §6, WP3b.5 F1).
+
+    The SDK is imported inside the body (D4); a missing ``langfuse`` is ``CapabilityError`` -> exit 6
+    naming the pip package. The call shape is ``VERIFY``-marked: phase 3 pins the SDK version and the
+    exact settings resource/field against a live project.
+    """
+    try:
+        # VERIFY(settings-langfuse): the v3 client on the package root
+        from langfuse import Langfuse  # pyright: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise _settings_unavailable("langfuse", ADAPTERS["langfuse"].package) from exc
+    # VERIFY(settings-langfuse): the constructor reads the project credentials from the environment
+    # and performs no request; the project's own defaults live on the generated public API.
+    client = Langfuse()
+    # VERIFY(settings-langfuse): `projects.get()` is the current project; its default judge/evaluator
+    # model is the setting this check compares with `judges.<name>.model`.
+    project = client.api.projects.get()
+    return _default_model(project.default_evaluator_model)
+
+
+def pydantic_evals_default_judge_model() -> str:
+    """pydantic-evals' own default judge model (CONTRACT §6, WP3b.5 F1).
+
+    Read from the installed ``LLMJudge`` metric's field default -- the package's default, not a
+    model evalops invents. A missing ``pydantic-evals`` is ``CapabilityError`` -> exit 6 naming the
+    pip package. ``VERIFY``-marked: phase 3 pins the SDK version and the field name.
+    """
+    try:
+        # VERIFY(settings-pydantic-evals): the metric whose default this reader reports
+        from pydantic_evals.evaluators import LLMJudge  # pyright: ignore[reportMissingImports]
+    except ImportError as exc:
+        raise _settings_unavailable("core", ADAPTERS["core"].package) from exc
+    # VERIFY(settings-pydantic-evals): `model_fields["model"]` is LLMJudge's declared default model.
+    return _default_model(LLMJudge.model_fields["model"].default)
+
+
+SETTINGS_READERS: dict[str, Callable[[], str]] = {
+    "core": pydantic_evals_default_judge_model,
+    "langfuse": langfuse_default_judge_model,
+}

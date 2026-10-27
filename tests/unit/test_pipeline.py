@@ -51,7 +51,7 @@ CALIBRATION = "".join(
         {"inputs": {"question": "q4"}, "outputs": "I don't know.", "expectations": {"human_labels": {"helpful": 0}}},
     )
 )
-JUDGES = "\njudges:\n  helpful: {min_agreement: 0.8, min_kappa: 0.5}\n"
+JUDGES = "\njudges:\n  helpful: {min_agreement: 0.8, min_kappa: 0.5, model: fake-judge@1}\n"
 #: A drift gate that can only fail: the control run must *improve* `facts/mean` by 1.0.
 TIGHT_DRIFT = '\ngates:\n  metrics:\n    "facts/mean": {max_drop: -1}\n'
 TIGHT_GATE = '\ngates:\n  metrics:\n    "facts/mean": {min: 1.5}\n'
@@ -193,6 +193,7 @@ def test_dry_run_lists_every_stage_and_writes_nothing():
         assert code == 0 and nightly["code"] == 0, nightly
         assert _table(nightly) == [
             ("baseline", ["baseline"], True),
+            ("judge-settings", ["judges", "--check-settings"], True),
             ("checkout", ["git", "-c", "advice.detachedHead=false", "checkout", "-q", "<baseline git_sha>"], True),
             ("eval", ["eval", "--dataset", "golden_regression", "--stage", "control"], True),
             ("gate", ["gate", "--label", "drift"], True),
@@ -484,10 +485,12 @@ def test_nightly_without_a_baseline_fails_loudly():
         code, envelope = proj.run_cli(root, "pipeline", "nightly")
         assert code == 1 == envelope["code"], envelope
         assert envelope["ok"] is False and envelope["command"] == "pipeline"
-        assert _names(envelope) == ["baseline", "control"], "no checkout/restore without a baseline"
+        assert _names(envelope) == ["baseline", "judge-settings", "control"], "no checkout/restore without a baseline"
         baseline = _steps(envelope)[0]
         assert baseline["code"] == 0 and baseline["ok"] is True
-        control = _steps(envelope)[1]
+        settings = _steps(envelope)[1]
+        assert settings["name"] == "judge-settings" and settings["code"] == 0, settings
+        control = _steps(envelope)[2]
         assert control["ok"] is False and control["code"] == 1, control
         assert control.get("skipped") is not True, "a missing baseline is a failure, not a skip"
         assert control["reason"] and "baseline" in control["reason"]
@@ -521,9 +524,9 @@ def test_nightly_uses_data_baseline_git_sha_and_restores_the_ref_on_failure():
 
         code, nightly = proj.run_cli(root, "pipeline", "nightly")
         assert code == 1 == nightly["code"], nightly
-        assert _names(nightly) == ["baseline", "checkout", "eval", "gate", "restore"]
+        assert _names(nightly) == ["baseline", "judge-settings", "checkout", "eval", "gate", "restore"]
         assert nightly["data"]["baseline_git_sha"] == sha, "read from data.baseline, not the legacy top level"
-        checkout = _steps(nightly)[1]
+        checkout = _steps(nightly)[2]
         assert checkout["code"] == 0 and checkout["argv"][-1] == sha
         assert _steps(nightly)[-2]["name"] == "gate" and _steps(nightly)[-2]["code"] == 1
         assert _steps(nightly)[-1]["name"] == "restore" and _steps(nightly)[-1]["code"] == 0
@@ -553,8 +556,8 @@ def test_nightly_success_restore_really_moves_head_back_and_records_it():
 
         code, nightly = proj.run_cli(root, "pipeline", "nightly")
         assert code == 0 == nightly["code"], nightly
-        assert _names(nightly) == ["baseline", "checkout", "eval", "gate", "restore"]
-        assert [step["code"] for step in _steps(nightly)] == [0, 0, 0, 0, 0]
+        assert _names(nightly) == ["baseline", "judge-settings", "checkout", "eval", "gate", "restore"]
+        assert [step["code"] for step in _steps(nightly)] == [0, 0, 0, 0, 0, 0]
 
         restore = _steps(nightly)[-1]
         assert restore["argv"][-1] == branch, "the plan restores the original branch, not the sha"
@@ -591,7 +594,7 @@ def test_nightly_unresolvable_baseline_sha_is_exit_5_with_the_steps_in_the_envel
         assert envelope["command"] == "pipeline" and envelope["ok"] is False
         assert envelope["data"]["baseline_git_sha"] == missing
         steps = _steps(envelope)
-        assert [step["name"] for step in steps] == ["baseline", "checkout"]
+        assert [step["name"] for step in steps] == ["baseline", "judge-settings", "checkout"]
         checkout = steps[-1]
         assert checkout["code"] == 5 and checkout["ok"] is False
         assert checkout["argv"][-1] == missing
@@ -644,7 +647,7 @@ def test_nested_steps_load_the_same_config_file_the_pipeline_was_given():
         # WP2.2 (D1): no production baseline is exit 1 now, but the nested baseline step still ran
         # with the pipeline's own config file -- otherwise the load would have failed with exit 2.
         assert code == 1 == envelope["code"], envelope
-        assert _names(envelope) == ["baseline", "control"]
+        assert _names(envelope) == ["baseline", "judge-settings", "control"]
         assert _steps(envelope)[0]["code"] == 0, "the nested baseline step found custom.yaml"
         assert _steps(envelope)[0]["ok"] is True
     finally:
@@ -742,9 +745,17 @@ def test_error_envelope_normalizes_a_data_carrying_error_outside_the_matrix():
     class Cfg:
         env = "local"
 
+    class _StageLike(EvalOpsError):
+        """A bare error carrying `data`, the shape `pipeline._StageError` raises."""
+
+        data: dict
+
+        def __init__(self, message: str, code: int, data: dict):
+            super().__init__(message, code)
+            self.data = data
+
     steps = [{"name": "checkout", "code": 5, "ok": False}]
-    exc = EvalOpsError("git failed: bad ref", 128)
-    exc.data = {"stage": "nightly", "steps": steps}
+    exc = _StageLike("git failed: bad ref", 128, {"stage": "nightly", "steps": steps})
     envelope = cli._error_envelope(Args(), Cfg(), exc)
     assert envelope["ok"] is False and envelope["code"] == 5, envelope
     assert envelope["command"] == "pipeline" and envelope["env"] == "local", envelope

@@ -46,6 +46,10 @@ class RowResult:
     # was evaluated from. Appended so positional constructors stay valid; None means a v0 writer
     # and readers fall back to `row_id`.
     row_key: str | None = None
+    # The resolved identity of every declared judge that scored this row (WP3b.5 C2, additive):
+    # `{judge_name: {"model": ..., "prompt_version": ...}}`. None means a v0 writer/reader; a
+    # declared-spec score without its entry here is a judge-named contract violation (exit 5).
+    judge_models: dict[str, dict[str, str]] | None = None
 
 
 @dataclass

@@ -11,6 +11,7 @@ rubric fallback over LiteLLM (:mod:`evalops.scorers.litellm_judge`).
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from ..judges import JudgeSpec
 from ..scoring import scorer, to_float
@@ -34,11 +35,18 @@ def spec_judge(spec: JudgeSpec, *, evaluator: str) -> Callable[..., float | None
     model, prompt version, sampling); a missing `litellm` is the same exit 6 with
     `pip install litellm`.
 
-    Recording the resolved model per verdict is WP3b.5.
+    The returned scorer carries the spec's resolved identity (`evalops_judge`), which is what
+    `run._evaluate` records on the run and per verdict (WP3b.5 C1); stamping here means both
+    executors are covered without touching either executor module.
     """
     if spec.judge == "litellm":
-        return litellm_judge(spec)
-    return native_judge(spec, evaluator=evaluator)
+        scorer_fn: Any = litellm_judge(spec)
+    else:
+        scorer_fn = native_judge(spec, evaluator=evaluator)
+    # WP3b.5 C1: the single dispatch point stamps the spec identity on the returned function. A
+    # plain function object accepts the attribute; `run._evaluate` reads it back per score key.
+    scorer_fn.evalops_judge = {"model": spec.model, "prompt_version": spec.prompt_version}
+    return scorer_fn
 
 
 def span_judge(judge, *, name: str, kind: str = "tool", select=None, max_spans: int = 10):

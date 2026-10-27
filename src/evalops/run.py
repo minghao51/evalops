@@ -68,6 +68,44 @@ def _client_side_judge_calls(cfg, evaluator: str) -> int:
     return sum(1 for spec in declared.values() if spec.judge == "litellm" or not server_side_native)
 
 
+def _judge_identities(declared: dict[str, judges.JudgeSpec]) -> dict[str, dict[str, str]]:
+    """The per-judge identity recorded on the run and on every verdict (WP3b.5 C3/C5)."""
+    return {name: {"model": spec.model, "prompt_version": spec.prompt_version} for name, spec in declared.items()}
+
+
+def _stamp_judge_identities(rows, declared: dict[str, judges.JudgeSpec]) -> None:
+    """Stamp `row.judge_models` from the declared specs (WP3b.5 C3).
+
+    Every declared judge whose score is on the row gets its pinned `{model, prompt_version}` entry
+    (additive: a row with no declared-spec score gets `{}`). `--judge-only` re-scores from stored
+    rows, so re-stamping here means a stale value can never survive. The contract is then enforced
+    by :func:`_require_judge_identities`.
+    """
+    identities = _judge_identities(declared)
+    for row in rows:
+        scores = row.scores or {}
+        row.judge_models = {name: identities[name] for name in identities if name in scores}
+    _require_judge_identities(rows, declared)
+
+
+def _require_judge_identities(rows, declared: dict[str, judges.JudgeSpec]) -> None:
+    """The contract: a declared judge's score must carry its resolved identity (CONTRACT §6).
+
+    A verdict without a resolved model is `EvalOpsError(EXIT_RUNTIME)` naming the judge -- never a
+    silent null. This is deliberately a separate check from the stamping, so dropping (or breaking)
+    the stamping is caught here instead of disappearing into a `null` in the rows artifact.
+    """
+    for row in rows:
+        present = row.judge_models or {}
+        for name in sorted(set(row.scores or {}) & set(declared)):
+            if name not in present:
+                raise EvalOpsError(
+                    f"judge '{name}': verdict has no resolved model; a declared judge's score must "
+                    "record its pinned model and prompt version (CONTRACT §6)",
+                    EXIT_RUNTIME,
+                )
+
+
 def _with_spec_judges(cfg, scorers, *, evaluator: str):
     """Append one scorer per declared judge spec, in sorted name order (WP3b.3 D1).
 
@@ -110,6 +148,9 @@ def plan(cfg, dataset, stage, repeats=None, judge_only=False) -> dict:
         raise EvalOpsError(f"dataset '{dataset}' not synced; run `evalops sync datasets`", EXIT_USAGE)
     ledger = cast(Ledger, reg.get("ledger"))
     meta = cfg.hook("judge_meta")()
+    # WP3b.5 B3: a run-level identity that disagrees with a declared spec is exit 2 here, before
+    # the cost estimate and before any ledger row (the same load point as `judges.load`).
+    judges.conflicts_with_meta(cfg, meta)
     # D2/WP3b.3: a declared judge spec adds one client-side model call per row. The evaluator is
     # resolved by *name* from the config (a plain read) -- plan never instantiated that plugin and
     # still does not. No declared spec -> 0 extra calls, so existing estimates are unchanged.
@@ -154,7 +195,11 @@ def row_to_json(r: RowResult, max_payload_chars) -> dict:
 
 
 def rows_from_artifact(text, source: str = "evalops/rows.jsonl") -> list[RowResult]:
-    """Parse a rows.jsonl artifact: v0 lines (no version fields) read fine, extra fields are ignored."""
+    """Parse a rows.jsonl artifact: v0 lines (no version fields) read fine, extra fields are ignored.
+
+    `judge_models` is read additively (WP3b.5 C4): a v0 line has no judge identity and yields
+    ``None``, while a current line round-trips the resolved identity of every declared judge.
+    """
     rows = []
     for line in text.splitlines():
         if not line.strip():
@@ -176,6 +221,7 @@ def rows_from_artifact(text, source: str = "evalops/rows.jsonl") -> list[RowResu
                 trace=AgentTrace.from_dict(d.get("trace"), source=source),
                 trace_metrics=d.get("trace_metrics") or {},
                 row_key=d.get("row_key"),  # additive: v0 rows have no stable key
+                judge_models=d.get("judge_models"),  # additive: v0 rows have no judge identity
             )
         )
     return rows
@@ -286,6 +332,9 @@ def _evaluate(
     dstore = cast(DatasetStore, reg.get("datasets"))
     reps = _repeats(cfg, stage, repeats)
     meta = cfg.hook("judge_meta")()
+    # WP3b.5 B3: `judge_meta()` may add metadata but never override a declared spec's pin. Exit 2
+    # here, before any estimate, budget reservation or ledger row.
+    judges.conflicts_with_meta(cfg, meta)
     # D2/WP3b.3: the estimate also pays for the declared judge specs that call out from this
     # process (the litellm fallback, or a native adapter that is not server-side).
     n_llm = int(meta.get("llm_judge_count", 0)) + _client_side_judge_calls(cfg, evaluator_plugin.name)
@@ -321,6 +370,8 @@ def _evaluate(
     # their order is untouched) and before the `--scorer` filter, which must be able to select one.
     # A name collision with an app scorer is exit 2 here -- before the budget reservation and the
     # ledger row below -- and a missing executor SDK is exit 6 at the same point.
+    declared = judges.load(cfg)
+    judge_identities = _judge_identities(declared)
     scorers = _with_spec_judges(cfg, scorers, evaluator=evaluator_plugin.name)
     if scorer_filter:
         scorers = [s for s in scorers if scorer_name(s) in scorer_filter]
@@ -414,6 +465,13 @@ def _evaluate(
                     **{f"plugin.{k}": v for k, v in reg.describe().items()},
                     **{f"prompt.{n}": pr_mod.ref(e) for n, e in plock.items()},
                     **{f"judge.{k}": v for k, v in meta.items()},
+                    # WP3b.5 C5: the resolved identity of every declared spec is recorded *on the
+                    # run*, beside the existing `judge.*` app metadata (additive keys).
+                    **{f"judge.{name}.model": identity["model"] for name, identity in judge_identities.items()},
+                    **{
+                        f"judge.{name}.prompt_version": identity["prompt_version"]
+                        for name, identity in judge_identities.items()
+                    },
                     "behavior_config": canonical(full_cfg)[:4000],
                 },
             )
@@ -455,6 +513,13 @@ def _evaluate(
                         r.trace_metrics = r.trace.metrics()
                 _post_score(result.rows, trace_scorers)
                 result.metrics = {**result.metrics, **aggregate_rows(result.rows)}
+
+            # WP3b.5 C3: stamp the resolved identity of each declared spec per verdict (both the
+            # native-scorer path and the `_post_score` trace-scorer path converge here), then enforce
+            # the contract: a verdict without a resolved model is exit 5, never a silent null.
+            # `--judge-only` re-scores from stored rows and is re-stamped from the current specs, so
+            # a stale value can never survive.
+            _stamp_judge_identities(result.rows, declared)
 
             rows_text = "".join(
                 json.dumps(formats.stamp(row_to_json(r, max_payload)), default=str) + "\n" for r in result.rows

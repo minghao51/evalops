@@ -70,7 +70,7 @@ gates:
     success: [{metric: tool_trajectory/mean, min: 1.0}, {metric: agent_route/mean, min: 1.0}]
     min_pass_hat_k: 0.9
 judges:
-  helpful: {min_agreement: 0.75, min_kappa: 0.5}
+  helpful: {min_agreement: 0.75, min_kappa: 0.5, model: fake-judge@1}
 cost:
   prices_per_1m_tokens:
     generation: {input: 1.0, output: 1.0}
