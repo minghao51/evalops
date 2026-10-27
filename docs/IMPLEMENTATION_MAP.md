@@ -111,11 +111,13 @@ Rules that apply to every WP:
 | 3b.5 | Pin enforcement + resolved-model recording per verdict + nightly server-side judge settings check + calibration as gate input | **done** — `e484552` (1 PASS review + 1 narrow mutation round; unpinned judge → exit 1 with reason; settings drift fails nightly; calibration evidence blocks the gate; 454 → 482 tests) |
 | **G3b** | | every preset's default judges are native, pinned, recorded; fallback only where declared |
 
-### Phase 3 — Vendor contract verification (needs services)
+### Phase 3 — Vendor contract verification (needs services; keys for langsmith/databricks are backlog)
 | WP | Deliverable | Done-when |
 |---|---|---|
-| 3.1 | docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/` per backend, `-m contract`, nightly job, recorded HTTP fixtures | contract suite green locally; offline CI green from fixtures |
-| 3.2 | Resolve all 30+ `VERIFY` lines, highest risk first: `mlflow.result_df` shape, `langfuse.api.trace.get`, `langsmith.pull_prompt_commit`, logfire private SQL | zero unresolved VERIFY: each is an asserted test or a documented `beta` with a user-visible hint |
+| 3.0 | Evaluator parity per ADR 0008: universal `error_rate`/`budget_exceeded_rate` emission in `run.py`, `report_usage` + tracer backfill under every evaluator, `doctor` warning for a self-tracing evaluator paired with a separate tracer | vendor evals emit the core metrics; usage lands under vendors (`rows_missing_usage: 0` with `report_usage`); doctor warns honestly; goldens byte-identical. Packet: `docs/packets/WP-PAR.md` |
+| 3.1a | Contract slice, mlflow + postgres: compose services in `tests/contract/`, live five-role tests (prompts/datasets/ledger/tracer/evaluator) following `test_ledger_postgres.py`'s pattern | `make contract` green with docker, clean skips without; offline suite untouched. Packet: `docs/packets/WP3.1a.md`. Dispatch AFTER 3.0 |
+| 3.1b | Deferred slice: langfuse+clickhouse compose, recorded HTTP fixtures, CI nightly wiring for the contract suite | same green-with-services bar for the langfuse stack; fixtures replay offline in CI |
+| 3.2 | Resolve all 30+ `VERIFY` lines, highest risk first: `mlflow.result_df` shape, `langfuse.api.trace.get`, `langsmith.pull_prompt_commit`, logfire private SQL. Evidence already banked from the 2026-10-27 e2e platform run (`../e2e/README.md` outside the repo): logfire `query_json_rows` needs keyword-only `min_timestamp` + `httpx` extra; mlflow 3.17 REST/SDK drift; row-error column mapping | zero unresolved VERIFY: each is an asserted test or a documented `beta` with a user-visible hint |
 | 3.3 | Native lineage/backlinks per backend + `evalops lineage` + lineage block in the gate report | a run's lineage is reconstructable from the ledger alone; backlink asserted per backend |
 | 3.4 | Generated capability docs + SDK versions in `doctor --json` | docs regenerate with zero diff |
 | **G3** | | every VERIFY asserted-green or marked beta; lineage works on ≥2 backends |
