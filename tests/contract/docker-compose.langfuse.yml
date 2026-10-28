@@ -1,0 +1,199 @@
+# WP3.1b: the Langfuse self-host contract stack (six services + two init containers), as its OWN
+# compose project (`name:` below) so it is isolated from `docker-compose.yml` (the evalops ledger
+# Postgres on 55432 + the MLflow slice on 55000). `tests/contract/test_langfuse_plugin.py` boots
+# both files, but only ever tears *this* one down.
+#
+# Why a separate project instead of a `profile` in the shared file: profiles filter what `up`
+# starts, they do NOT scope `down` -- `docker compose -f docker-compose.yml --profile langfuse down`
+# still takes down the whole project, so the ledger Postgres and MLflow would be collateral damage
+# of a Langfuse teardown. Compose `down` is project-scoped, and a `name:` here makes that scope
+# exact: whatever happens in this project cannot reach theirs.
+#
+# Shape vendored from the upstream self-host compose at
+#   https://github.com/langfuse/langfuse/blob/v4.71.0/docker-compose.yml
+# (web + worker + postgres + clickhouse + redis + minio; the Langfuse Postgres is a *separate,
+# internal* service -- our evalops ledger Postgres keeps port 55432 and both stay isolated).
+#
+# Pinned to the current self-host major (v4): the `langfuse>=3` SDK extra resolves to SDK 5, whose
+# read APIs (observations v2, experiments) a v3 server rejects -- "only available in a Langfuse v4
+# write mode" -- so the v4 image is the pairing the plugin is actually installed against.
+# Only `langfuse-web` publishes a host port (33000 -> 3000); everything else is internal, so this
+# project can never collide with the ledger Postgres on 55432 or a developer's own Langfuse.
+# Image tags are pinned (chainguard publishes only rolling tags, hence the digest pin).
+# Every value below is a fixed DEV-ONLY fixture, never a secret: API keys and test-user credentials
+# are part of the contract fixture so `auth_check` proves self-bootstrapping, no manual account.
+name: evalops-contract-langfuse
+
+services:
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:4.71.0
+    restart: "no"
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment: &langfuse-env
+      NEXTAUTH_URL: http://127.0.0.1:33000
+      DATABASE_URL: postgresql://postgres:postgres@langfuse-postgres:5432/postgres
+      SALT: wp31b-contract-salt
+      # 64 hex chars (openssl rand -hex 32), fixed: the server refuses to boot without it.
+      ENCRYPTION_KEY: ff6eb1e4ee9feb1b15eb5424cb84d0b866f57496ce150dba0881908b3be574be
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: wp31b-contract-redis
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:4.71.0
+    restart: "no"
+    depends_on: *langfuse-depends-on
+    ports:
+      - "33000:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: wp31b-contract-nextauth-secret
+      # Self-host seeding (A3): the org/project/user and the API keys the tests use exist because
+      # of these envs, not because anyone created an account by hand.
+      LANGFUSE_INIT_ORG_ID: wp31b-contract-org
+      LANGFUSE_INIT_ORG_NAME: evalops contract
+      LANGFUSE_INIT_PROJECT_ID: wp31b-contract-project
+      LANGFUSE_INIT_PROJECT_NAME: evalops contract
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-e2e-contract
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-e2e-contract
+      LANGFUSE_INIT_USER_EMAIL: wp31b@example.test
+      LANGFUSE_INIT_USER_NAME: wp31b
+      LANGFUSE_INIT_USER_PASSWORD: wp31b-contract-pass
+    healthcheck:
+      # The image is node-based and ships no curl. The server binds the container's own hostname
+      # (a loopback probe is ECONNREFUSED), so the probe resolves it from process.env.HOSTNAME.
+      test: ["CMD", "node", "-e", "fetch('http://'+process.env.HOSTNAME+':3000/api/public/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      # First boot runs the Postgres + ClickHouse migrations: 300s budget (A4) before the poll in
+      # the test gives up and skips.
+      start_period: 300s
+
+  langfuse-postgres:
+    image: postgres:16-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12.11.4
+    restart: "no"
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # Init container: idempotent `default` DB setup once the server answers (the packet's "clickhouse +
+  # its init container"). The server image creates the DB itself, so this only proves readiness.
+  clickhouse-init:
+    image: docker.io/clickhouse/clickhouse-server:25.12.11.4
+    restart: "no"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        clickhouse-client --host clickhouse --user clickhouse --password clickhouse
+        --query "CREATE DATABASE IF NOT EXISTS default"
+
+  minio:
+    image: cgr.dev/chainguard/minio:latest@sha256:e70b2b1e74d79457f808710483bd726ff364529ca30736eaa15a6ab547d3a5a7
+    restart: "no"
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # Init container: create the `langfuse` blob bucket before web/worker start writing to it.
+  minio-init:
+    image: cgr.dev/chainguard/minio:latest@sha256:e70b2b1e74d79457f808710483bd726ff364529ca30736eaa15a6ab547d3a5a7
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 minio miniosecret
+        && mc mb --ignore-existing local/langfuse
+
+  redis:
+    image: docker.io/redis:7.4-alpine
+    restart: "no"
+    command: ["redis-server", "--requirepass", "wp31b-contract-redis", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "wp31b-contract-redis", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 30
+
+volumes:
+  langfuse_postgres_data: {}
+  langfuse_clickhouse_data: {}
+  langfuse_clickhouse_logs: {}
+  langfuse_minio_data: {}
+  langfuse_redis_data: {}
