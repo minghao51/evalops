@@ -23,7 +23,7 @@ backlog. The completed `docs/packets/WP3b.5.md` / `WP-PAR.md` are the newest pac
 | Phase 3b | **closed at G3b, tagged `v0.5.0`** — 3b.1 `173a416`, 3b.2 `c2beda5`, 3b.3 `f8668fe`, 3b.4 `59518c2`, 3b.5 `e484552` |
 | Phase 3 | **under way**: WP3.0 `dc617ee` (parity, ADR 0008), WP3.1a `25943b4` (live mlflow+postgres contract slice, 7 findings banked on 3.2); next 3.1b or 3.2; langsmith/databricks keys backlog; Logfire live, docker available |
 | Tree | clean; no uncommitted work |
-| Next artifact | WP3.1b (langfuse stack + fixtures + CI nightly) or WP3.2 (VERIFY resolution — the live-findings list is ready) |
+| Next artifact | dispatch `docs/packets/WP3.1b.md` (langfuse six-container slice, profiled) — then WP3.2 (mlflow+logfire VERIFY items need no new stack) |
 | Gate ahead | **G3**: every VERIFY asserted-green or beta-with-hint; lineage on ≥2 backends. Needs langsmith/databricks keys eventually — Logfire live, docker available |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
