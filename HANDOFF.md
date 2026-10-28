@@ -1,16 +1,17 @@
-# HANDOFF: evalops — G3b closed at `v0.5.0` (phase 3b done); phase 3 started — WP3.0 (parity) + WP3.1a packets ready
+# HANDOFF: evalops — G3b closed at `v0.5.0`; phase 3 under way (WP3.0 parity + WP3.1a/b contract slices landed) — next: WP3.2
 
 Repo: **https://github.com/minghao51/evalops** (public) · branch `main` · CI green on 3.10/3.11/3.12
-(tests: **482 offline + 1 Postgres contract test, deselected**).
+(tests: **503 offline + 13 contract tests, deselected**).
 Read this file, then `docs/CONTRACT.md` (the invariants) and `docs/IMPLEMENTATION_MAP.md` (the plan).
 `docs/STATE.md` is the short status board; phases 1 and 2 are closed (**G1**, **G2**), phase 3b
-(judges, native-first) is **closed at G3b (`v0.5.0`)**: WP3b.1 `JudgeSpec`, WP3b.2 (native
-adapters), WP3b.3 (LiteLLM fallback + wiring), WP3b.4 (pairwise/panel wrappers) and **WP3b.5**
+(judges, native-first) is **closed at G3b (`v0.5.0`)** — WP3b.1 `JudgeSpec`, WP3b.2 (native
+adapters), WP3b.3 (LiteLLM fallback + wiring), WP3b.4 (pairwise/panel wrappers) and WP3b.5
 (pin enforcement + resolved-model recording + nightly settings check + calibration as gate input,
-`e484552`) all landed. **Phase 3 is started**: WP3.0 (evaluator parity per ADR 0008) and WP3.1a
-(mlflow+postgres contract slice) have dispatch-ready packets; a live e2e platform (mlflow+postgres+
-Logfire) runs outside the repo with its findings banked for 3.2. langsmith/databricks keys are
-backlog. The completed `docs/packets/WP3b.5.md` / `WP-PAR.md` are the newest packet templates.
+`e484552`). **Phase 3 is under way**: WP3.0 (evaluator parity, ADR 0008) `dc617ee`, WP3.1a
+(live mlflow+postgres contract slice) `25943b4`, WP3.1b (live Langfuse v4 slice in its own compose
+project) `e9180c6` — the VERIFY evidence list for 3.2 now covers mlflow, logfire and langfuse.
+langsmith/databricks keys are backlog. The completed `docs/packets/WP3.1b.md` / `WP-PAR.md` are the
+newest packet templates.
 
 ## 0. Current snapshot (start here)
 
@@ -238,7 +239,7 @@ Read them before promising anything. The ones that bite:
   `data.steps` but that branch is untested (needs mocking `_git`);
 - `ci_log.jsonl` is now one JSON envelope per line (bash teed multi-line rendered envelopes).
 
-## 6. Phase status — phases 1 and 2 closed (G1, G2 at `v0.4.0`); phase 3b in progress
+## 6. Phase status — phases 1 and 2 closed (G1, G2 at `v0.4.0`); 3b closed at G3b (`v0.5.0`); phase 3 under way
 
 ### WP1.4 — test debt (DONE, `1237611`)
 
@@ -534,13 +535,53 @@ After 3b.1 → 3b.2 (native adapters per preset) → 3b.3 (LiteLLM fallback) →
 **G3b** tags `v0.5.0` (the LiteLLM optional dep and fake SDK fixtures already landed in 3b.3;
 stays offline).
 
+### WP3.0 — evaluator parity: metrics, usage, tracer role (DONE, `dc617ee`)
+
+ADR 0008 (D12, evaluator-owned tracing) implemented. `run.py` now owns `error_rate` /
+`budget_exceeded_rate` for **every** evaluator (computed after row errors are final; core's private
+copies deleted), harvests `evalops.report_usage` under every evaluator (per-invocation collector,
+inputs-keyed stash, last attempt wins on retries, core's own collector never clobbered), and runs
+the configured tracer's usage backfill once per run. `doctor` warns when a **self-tracing** evaluator
+(the new `self_tracing` ClassVar in `ports.py`; mlflow sets it) is paired with a different
+configured tracer — truthful about backfill ("usage backfill may still query it for rows missing
+usage"), `warnings` key only when non-empty so every golden is byte-identical. mlflow `result_df`
+rows map per-row failures to `row.error` (VERIFY-marked, WP3.2 resolves the column). Review: 1 BLOCK
+(2 defects — the `provides`-based rule false-warned `evaluator: core` + `tracer: logfire`; the text
+denied the backfill this WP adds) + narrow fix + narrow re-review PASS. 482 → 503 tests.
+
+### WP3.1a — live mlflow + postgres contract slice (DONE, `25943b4`)
+
+`tests/contract/docker-compose.yml` gains an mlflow service (55000, proxied artifacts — the literal
+`--default-artifact-root` breaks host clients on MLflow 3.17; healthcheck; postgres service
+byte-identical) and `test_mlflow_plugin.py` proves the five-role mlflow plugin live: prompts/alias,
+datasets round-trip, ledger + artifact/manifest round-trip, a real `_evaluate` (server-side
+FINISHED, scores, trace ids, `error_rate`, artifacts in the ledger), and the stored-rows judge-only
+delegation on mixed mlflow+postgres wiring. House skip ladder (no docker / unusable / not ready /
+drivers missing → clean skips). Review: 1 PASS, 0 defects. `make contract` = 6 green; offline 503
+unchanged.
+
+### WP3.1b — live Langfuse v4 contract slice, own compose project (DONE, `e9180c6`)
+
+`tests/contract/docker-compose.langfuse.yml` is a **separate compose project**
+(`evalops-contract-langfuse`: web 33000, worker, its own postgres, clickhouse, minio, redis + two
+init containers), self-bootstrapped via `LANGFUSE_INIT_*` (`pk-lf-e2e-contract` /
+`sk-lf-e2e-contract`) — no external credentials. Pinned **langfuse 4.71.0 + clickhouse 25.12.11.4**:
+the `langfuse>=3` extra installs SDK 5.0.4, whose read APIs a v3 server refuses. Seven tests cover
+prompts/labels, dataset write idempotence (sha256 ids), tracer read-back with real trace ids, both
+`run_experiment` evaluator branches (native dataset + local data), stored-rows delegation, doctor
+auth. Teardown is project-scoped and guard-gated (never an external `EVALOPS_TEST_LANGFUSE_BASE_URL`
+stack, never the ledger project). Review: 1 BLOCK (a shared-file `compose down` is project-scoped
+and took the ledger postgres down) + fix round (external-URL guard) re-blocked + fix round 2
+(separate compose project, main file reverted byte-identical) + narrow re-review PASS. `make
+contract` all-extras = 13 green; offline 503 unchanged.
+
 ## 7. Remaining roadmap (phases 2 → 6)
 
 | Phase | WPs | Deliverable | Gate / needs |
 |---|---|---|---|
 | **2** CLI/pipeline as code + presets — **closed at G2, tagged `v0.4.0`** | 2.1 `evalops pipeline <stage>` in Python (`--dry-run`, idempotent, bash shim) **done**; 2.2 release re-verification + fork-PR locks + nightly fails without baseline **done**; 2.3 preset engine + `evalops init --preset` (7 presets) + generated capability matrix **done**; 2.4 CI adapters generated from one template (GH/GitLab/Azure/Jenkins) **done**; 2.5 calibration enforced in the pipeline **done** | pipeline parity, 7 presets, calibrate enforced | **G2**: tag **v0.4.0**. No external services. |
 | **3b** judges, native-first — 3b.1–3b.4 **done** | 3b.1 `JudgeSpec` (pin required, unpinned declared spec = exit 2 at load, `evalops judges`) **done** `173a416`; 3b.2 native adapters (MLflow `make_judge`, Langfuse managed evaluators, openevals, pydantic-evals) **done** `c2beda5`; 3b.3 LiteLLM rubric fallback + strict parsing + per-call cost + spec→scorer wiring (`judges.<name>.judge`) **done** `f8668fe`; 3b.4 pairwise (position swap) + panel **done** `59518c2`; 3b.5 pin enforcement (incl. `judge_meta()` never overriding the pin, model-only rules), resolved model per verdict, nightly server-side settings check, calibration as gate input **done** `e484552` | every preset's default judges native + pinned + recorded | **G3b**: tag **v0.5.0**. The LiteLLM optional dep + fake SDK fixtures are in (3b.3); stays offline. |
-| **3** vendor contract verification | 3.1 docker-compose (mlflow+postgres, langfuse+clickhouse), `tests/contract/`, nightly, recorded HTTP fixtures; 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`, langfuse trace get, langsmith `pull_prompt_commit`, logfire private SQL); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** + **credentials**: LangSmith/Logfire/Databricks keys — **ask the user before starting**. |
+| **3** vendor contract verification — 3.0/3.1a/3.1b **done** | 3.0 evaluator parity per ADR 0008 (`dc617ee`); 3.1a live mlflow+postgres contract slice (`25943b4`); 3.1b live Langfuse v4 slice in its own compose project (`e9180c6`); 3.1c recorded HTTP fixtures + CI nightly wiring (deferred); 3.2 resolve all 30+ `VERIFY` lines (mlflow `result_df`/`state` column, langfuse `api.trace.get` → `api.observations.get_many`, langsmith `pull_prompt_commit`, logfire private SQL + `min_timestamp`); 3.3 native lineage/backlinks + `evalops lineage` + gate-report lineage; 3.4 generated capability docs + SDK versions in `doctor --json` | zero unresolved VERIFY (asserted or β with a hint), lineage on ≥2 backends | **G3**. Needs **docker** (available) + **credentials**: Logfire live; LangSmith/Databricks keys are backlog. |
 | **4** Copier template + support tiers | 4.1 `template/` Copier project (7 presets); 4.2 tiers Generated → Contract-verified → Framework-verified derived from evidence; 4.3 golden render of 7 presets + offline lifecycle + `copier update` | 7/7 lifecycle green, template published | **G4**: public repo (already public). Needs the **distribution name decision (D1)**. |
 | **5** real framework trace fixtures | 5.1 real span fixtures × pinned versions (LangGraph, OpenAI Agents, ADK, Pydantic AI, CrewAI, LlamaIndex, Strands, AutoGen, Semantic Kernel, smolagents, DSPy); 5.2 verified dialect table + `traces --unknown-attrs`; 5.3 breaker parity + runaway-loop tests; 5.4 cassette parity + consent-gated record | 11 frameworks verified, drift visible in CI | **G5**. Heavy: installing 11 frameworks with pinned versions; needs user consent for recorded traces. |
 | **6** release, docs, ecosystem | 6.1 publish under the D1 name + v1.0.0 + tag→build→matrix→publish workflow; 6.2 docs regeneration (README doctest, PLUGINS, AGENT_TRACES, ADR index); 6.3 plugin SDK (entry-point spec, `evalops plugin new`, conformance kit); 6.4 compatibility policy + deprecation table | installable from PyPI, 2 external plugins certified | **G6**: v1.0.0. Needs PyPI/org + LICENSE + settled name. |
@@ -610,61 +651,76 @@ ci/                      pipeline.sh (shim → `evalops pipeline`) + the four ge
 ## 10. First commands in the new thread
 
 ```bash
-cd /home/howt/work/evalops_universal/evalops && make check      # expect 482 passed, 1 deselected
+cd /home/howt/work/evalops_universal/evalops && make check      # expect 503 passed, 13 deselected
 git fetch origin && git log --oneline main..origin/main     # is the other session ahead? which WP?
 gh run list --limit 1                                       # confirm CI green on main
-git tag -l v0.4.0                                           # phase 2 close marker (v0.5.0 = G3b)
-sed -n '/### Phase 3b/,/### Phase 3 —/p' docs/IMPLEMENTATION_MAP.md
-sed -n '/### WP3b.5/,/^## 7/p' HANDOFF.md                   # the WP that just landed
+git tag -l v0.4.0 v0.5.0                                    # G2 / G3b close markers
+sed -n '/### Phase 3 —/,/### Phase 4/p' docs/IMPLEMENTATION_MAP.md   # phase-3 rows + G3
+sed -n '/### WP3b.5/,/^## 7/p' HANDOFF.md                   # last closed 3b WP
+docker compose -f tests/contract/docker-compose.yml up -d   # ledger postgres + mlflow (55000)
+docker compose -f tests/contract/docker-compose.langfuse.yml up -d   # langfuse v4 project (33000)
 ```
 
 Then:
 
 1. **Check §4's coordination rules first.** `git fetch` + `git log --oneline main..origin/main`:
-   if the other session has already closed G3b or started phase 3, cross-check before doing
-   anything (disjoint trees or take the next WP).
-2. **Close G3b** — phase 3b is WP-complete (WP3b.5 at `e484552`). The gate checklist: every
-   preset's default judges native + pinned + recorded; fallback only where declared. Concretely:
-   the capability matrix lists a native adapter per evaluator (3b.2), every enforcement surface is
-   live (`judge pin:`/`judge calibration:` gate checks, exhaustive `unpinned`, `--check-settings`,
-   per-verdict `judge_models`), and `make check` + the zero-diff gates are green. Then tag
-   **`v0.5.0`** on main after CI is green.
-3. **Phase 3 (vendor contract verification) needs docker + LangSmith/Logfire/Databricks
-   credentials — ask the maintainer before starting it.** Two maintainer confirmations are still
-   pending (§8): the WP2.4 fork-PR posture and the missing `evalops ci-adapters` envelope golden.
+   if the other session has landed a phase-3 WP, cross-check it against the map's phase-3 row
+   before doing anything (disjoint trees or take the next WP).
+2. **Pick the next WP: 3.2 (VERIFY resolution) or 3.1c (recorded fixtures + CI nightly).**
+   3.2's evidence list is banked in the map's phase-3 row — the sharpest items need no new stack:
+   mlflow 3.17.2's failure column is `state` (not `status`), so `error_rate` cannot see predict
+   failures under the mlflow evaluator; langfuse SDK 5 removed `api.trace.get` so `usage()`
+   silently returns `{}` (use `api.observations.get_many`); failing langfuse items are dropped from
+   `item_results`; `run.py`'s artifact loop rebinds `name` so vendor-evaluator runs are named after
+   the last staged artifact (affects mlflow too); logfire's `query_json_rows` needs keyword-only
+   `min_timestamp` + the `httpx` extra. 3.1c adds recorded HTTP fixtures (offline CI replay) and
+   the nightly wiring for the contract suite.
+3. **Contract suites:** `make contract` runs the offline-skipped contract tests; with the extras
+   installed in a throwaway uv venv (`uv venv /tmp/cv && uv pip install --python
+   /tmp/cv/bin/python '<repo>[mlflow,langfuse,sql]' pytest`) run
+   `make contract PYTHON=/tmp/cv/bin/python` for all 13. The langfuse stack is its own compose
+   project and the module tears down only the project it booted.
+4. **Credentials:** Logfire is live (project `evalops-contract`, tokens in `evalops/.env`);
+   LangSmith and Databricks keys are **backlog** — ask the maintainer before any WP that needs them
+   (the langsmith/databricks slices of 3.2, and 3.3's per-backend backlinks).
+   Also pending maintainer confirmation (§8): the WP2.4 fork-PR posture and the missing
+   `evalops ci-adapters` envelope golden.
 
 Suggested opening message for the new thread (paste as the first user message):
 
 ```text
-Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.5
-record, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6 judge
-pinning — enforced since WP3b.5), docs/STATE.md (compromises 14/17 as resolved), and the map's
-phase-3b row + G3b gate in docs/IMPLEMENTATION_MAP.md. Phase 3b (judges, native-first) is
-WP-complete: WP3b.1 (JudgeSpec) at 173a416, WP3b.2 (native adapters) at c2beda5, WP3b.3 (LiteLLM
-fallback + wiring) at f8668fe, WP3b.4 (pairwise/panel wrappers) at 59518c2, and WP3b.5 (pin
-enforcement + resolved-model-per-verdict + nightly settings check + calibration as gate input) at
-e484552 — 482 offline tests green (make check), CI green on py3.10/3.11/3.12, phase 2 closed at G2
-(tag v0.4.0). A second agent session may work this repo — follow HANDOFF §4's coordination rules:
-git fetch + git log --oneline main..origin/main before dispatching anything, fetch/rebase before
-every commit, never reimplement a WP that already landed (branch a duplicate as
-wp<N>-alternative-<sha>, cross-check, fix narrow gaps only), stay in disjoint trees.
+Read HANDOFF.md (§0 snapshot, §2 non-negotiables, §4 dispatch protocol + coordination, §6 WP3b.5 +
+phase-3 records, §8 open decisions, §10), docs/CONTRACT.md (§1 exit codes, §3 port invariants, §6
+judge pinning — enforced since WP3b.5), docs/adr/0008-evaluator-owned-tracing.md, docs/STATE.md
+(compromises 14/17/18 as resolved), and the map's phase-3 rows + G3 gate in
+docs/IMPLEMENTATION_MAP.md. Phase 3b is closed at G3b (tag v0.5.0) and phase 3 is under way: WP3.0
+(evaluator parity per ADR 0008) at dc617ee, WP3.1a (live mlflow+postgres contract slice) at
+25943b4, WP3.1b (live Langfuse v4 slice in its own compose project) at e9180c6 — 503 offline tests
+green (make check), 13 contract tests deselected, CI green on py3.10/3.11/3.12. A second agent
+session may work this repo — follow HANDOFF §4's coordination rules: git fetch + git log --oneline
+main..origin/main before dispatching anything, fetch/rebase before every commit, never reimplement
+a WP that already landed (branch a duplicate as wp<N>-alternative-<sha>, cross-check, fix narrow
+gaps only), stay in disjoint trees.
 
-G3b is closed (tag `v0.5.0`). Phase 3 is under way: dispatch `docs/packets/WP-PAR.md` (evaluator
-parity per ADR 0008 — the decisions are made, the worker implements the code consequences), then
-`docs/packets/WP3.1a.md` (mlflow+postgres contract slice) after PAR lands. Langsmith/Databricks
-keys are backlog (Logfire is live; docker is available). Also pending maintainer confirmation
-(HANDOFF §8): the WP2.4 fork-PR posture and the missing `evalops ci-adapters` envelope golden.
+Next: WP3.2 (VERIFY resolution) or WP3.1c (recorded fixtures + CI nightly). 3.2's evidence is
+banked in the map's phase-3 row: mlflow 3.17.2's failure column is `state` not `status` (error_rate
+blind to predict failures), langfuse SDK 5 removed api.trace.get so usage() silently returns {} (use
+api.observations.get_many), failing langfuse items are dropped from item_results, run.py's artifact
+loop rebinds `name` so vendor-evaluator runs are named after the last staged artifact, logfire's
+query_json_rows needs keyword-only min_timestamp + httpx. LangSmith/Databricks keys are backlog —
+ask before any WP that needs them. Also pending maintainer confirmation (HANDOFF §8): the WP2.4
+fork-PR posture and the missing `evalops ci-adapters` envelope golden.
 
-Protocol for any new WP: write docs/packets/<WP>.md in the shape of docs/packets/WP3b.5.md (goal,
+Protocol for any new WP: write docs/packets/<WP>.md in the shape of docs/packets/WP3.1b.md (goal,
 fixed design decisions, falsifiable done-when, allowed/forbidden paths, commands, report format,
 reviewer prompt); dispatch it to evalops-worker (deepseek/deepseek-flash, cwd =
 /home/howt/work/evalops_universal/evalops); review the uncommitted tree with codex-luna-reviewer
 (openai-codex/gpt-6-luna, thinking xhigh; fallbacks: evalops-reviewer zai/glm-5.3-flash high, or
-evalops-reviewer-alt opencode-go/glm-5.3 — say which you used); loop on BLOCK; commit only after
-PASS as a feature commit + a separate docs commit; fetch/rebase before every commit; push and
-confirm with gh run list. Gates before every commit: make check, .venv/bin/python
-tests/run_without_pytest.py, make contract (skips offline), make schema zero drift, make
+evalops-reviewer-alt opencode-go/glm-5.3 — say which you used); loop on BLOCK (narrow fix rounds for
+review defects; every round found something real); commit only after PASS as a feature commit + a
+separate docs commit; fetch/rebase before every commit; push and confirm with gh run list. Gates
+before every commit: make check, .venv/bin/python tests/run_without_pytest.py, make contract (skips
+offline; use a throwaway uv venv with extras for the live slice), make schema zero drift, make
 capabilities and make ci-adapters zero diff, no unexpected golden churn. Never fabricate hashes,
 numbers, or evidence; undefined contract semantics are blockers — ask the maintainer.
 ```
-

@@ -1,18 +1,17 @@
 # evalops state board
 
-Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](IMPLEMENTATION_MAP.md)
+Updated: 2026-10-28 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](IMPLEMENTATION_MAP.md)
 
 ## Where we are
 
-- **Phase:** **phase 3b in progress** (judges, native-first) — WP3b.1 (`JudgeSpec`), WP3b.2 (native
-  judge adapters), WP3b.3 (LiteLLM rubric fallback + spec→scorer wiring) and WP3b.4 (pairwise +
-  panel wrappers) are done, and WP3b.5 (gate-time pin enforcement + resolved-model recording +
-  nightly server-side settings check + calibration as gate input) landed at `e484552` — phase 3b
-  is WP-complete; **G3b** (`v0.5.0`) closes it.
-- **Verified base:** `e484552` (WP3b.5) — **tests:** 482 green (`make check`), standalone 482/482.
-  **Postgres contract:** 1 passed with `.[sql,dev]` + docker. **CI:** py3.10/3.11/3.12 green on
-  `main` (last completed runs: `40341111179` WP3b.4 docs; the WP3b.4 feature run and
-  `40333980989` env-template chore also green).
+- **Phase:** **phase 3 under way** (vendor contract verification). Phase 3b closed at **G3b**
+  (`v0.5.0`). Phase 3: WP3.0 (evaluator parity, ADR 0008) `dc617ee`; WP3.1a (live mlflow+postgres
+  contract slice) `25943b4`; WP3.1b (live Langfuse v4 slice in its own compose project) `e9180c6`.
+  Next: WP3.2 (VERIFY resolution) or WP3.1c (recorded fixtures + CI nightly).
+- **Verified base:** `d80875d` (WP3.1b docs) — **tests:** 503 green (`make check`), standalone
+  503/503. **Contract:** 13 deselected offline; `make contract` = 6 green with mlflow+sql extras,
+  13 green with all extras (`uv venv` throwaway, never the repo `.venv`). **CI:** py3.10/3.11/3.12
+  green on `main` (WP3.1b feature `40710357518` and docs `40710431035`).
 - **Repo:** https://github.com/minghao51/evalops (public).
 - **G1 evidence (closed 2026-10-24, at 283 tests):** redaction property tests, format v0/v1 +
   future-version reads, statistics property tests, exit 0–7 through real commands, trace v1/v2
@@ -25,12 +24,12 @@ Updated: 2026-10-24 · owner: orchestrator · detail: [`IMPLEMENTATION_MAP.md`](
   (`tests/unit/test_calibration_enforcement.py`, four mutations red); `make check` 359, standalone
   359/359, `make contract` 1 skipped offline, `make schema` / `make ci-adapters` zero drift, goldens
   untouched. CI `40102918591` (WP2.5) + `40103336121` (docs) green on py3.10/3.11/3.12.
-- **Next:** **WP3b.5** — the last phase-3b WP: gate-time pin enforcement for **every** judge
-  (including `judge_meta()` never overriding the config pin; `unpinned` becomes exhaustive),
-  resolved model + prompt version recorded per verdict, the nightly server-side judge settings
-  check, and calibration as a gate input. Then **G3b** (`v0.5.0`). Packet shape for a new WP:
-  `docs/packets/WP3b.4.md` (newest). Contract suite: `make contract` with `evalops[sql]`
-  installed.
+- **Next:** **WP3.2** (resolve the banked VERIFY findings — mlflow `state` failure column, langfuse
+  `api.observations.get_many` replacing the removed `api.trace.get`, langfuse dropped
+  `item_results`, `run.py`'s rebinding `name`, logfire `min_timestamp` + `httpx`) or **WP3.1c**
+  (recorded HTTP fixtures + CI nightly wiring). LangSmith/Databricks keys are backlog — ask before
+  any WP that needs them. Packet shape for a new WP: `docs/packets/WP3.1b.md` (newest). Contract
+  suite: `make contract` with a throwaway `uv venv` carrying `evalops[mlflow,langfuse,sql]`.
 
 ## Work packages
 
