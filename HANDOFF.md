@@ -18,13 +18,13 @@ newest packet templates.
 | | |
 |---|---|
 | Verified base | `e484552` (WP3b.5) + G3b close docs — CI green on py3.10 / 3.11 / 3.12 (confirm with `gh run list`); this docs commit sits on top |
-| Tests | 503 offline (`make check`, 6 contract tests deselected), standalone 503/503, `make contract` 6 green with docker |
+| Tests | 526 offline (`make check`, 13 contract tests deselected), standalone 526/526, `make contract` 13 green with all extras |
 | Phase 1 | **closed at G1** (WP1.1–1.5) |
 | Phase 2 | **closed at G2, tagged `v0.4.0`** — WP2.1 `135bf0e` + exec bit `b670d7b`, WP2.3 `684c629`, WP2.2 `86f75fa`, WP2.4 `26d292c`, WP2.5 `4e00b29` |
 | Phase 3b | **closed at G3b, tagged `v0.5.0`** — 3b.1 `173a416`, 3b.2 `c2beda5`, 3b.3 `f8668fe`, 3b.4 `59518c2`, 3b.5 `e484552` |
-| Phase 3 | **under way**: WP3.0 `dc617ee` (parity, ADR 0008), WP3.1a `25943b4` (mlflow+postgres contract slice), WP3.1b `e9180c6` (live langfuse v4 slice, own compose project) — 3.2's evidence list now covers mlflow/logfire/langfuse; langsmith/databricks keys backlog |
+| Phase 3 | **under way**: WP3.0 `dc617ee` (parity, ADR 0008), WP3.1a `25943b4` (mlflow+postgres slice), WP3.1b `e9180c6` (live langfuse v4 slice), WP3.2a `3c034f7` (beta registry + guard, run-name bug, logfire) — next 3.2b (mlflow) / 3.2c (langfuse); 3.2d needs keys (backlog) |
 | Tree | clean; no uncommitted work |
-| Next artifact | WP3.2a (VERIFY ledger mechanism + run-name bug + logfire read path) packet ready; 3.2b (mlflow) / 3.2c (langfuse) / 3.2d (keys, backlog) follow |
+| Next artifact | WP3.2b (mlflow plugin resolution — packet to be written; the 4 `mlflow-*` beta entries name exactly what to resolve) then 3.2c (langfuse); 3.2d needs keys (backlog) |
 | Gate ahead | **G3**: every VERIFY asserted-green or beta-with-hint; lineage on ≥2 backends. Needs langsmith/databricks keys eventually — Logfire live, docker available |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
