@@ -649,3 +649,46 @@ def test_c5_a_plain_vendor_evaluator_never_warns():
         assert "warnings" not in envelope["data"], envelope["data"]
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# (H1, WP3.2a) the vendor evaluator sees the ledger run name -- not the last staged artifact
+# ---------------------------------------------------------------------------
+def _ledger_run_name(ledger_mod: Any, run_id: str) -> str:
+    """The run name the ledger recorded: what a human reads in the vendor UI (a vendor's too)."""
+    return str(ledger_mod.MemoryLedger.runs[run_id]["name"])
+
+
+def test_h1_a_vendor_evaluator_is_named_after_the_ledger_run():
+    """The artifact-staging loop used to rebind `name`, so every vendor run was the last artifact."""
+    root, plugins, ledger_mod = _vendor_project(dataset_text=THREE_ROWS)
+    try:
+        plugins.reset()
+        _sync(root)
+        envelope = _eval(root)
+        run_id = envelope["data"]["run_ids"][0]
+        ledger_name = _ledger_run_name(ledger_mod, run_id)
+        assert plugins.STATE["run_names"] == [ledger_name], (plugins.STATE["run_names"], ledger_name)
+        # the ledger name's shape, and the exact bug: an artifact path is never a run name
+        assert ledger_name.startswith("dev-") and ledger_name.endswith("-smoke-r1"), ledger_name
+        assert not ledger_name.endswith(".json"), ledger_name
+        assert ledger_name != "evalops/datasets.lock.json", ledger_name
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_h1_multi_repeat_runs_keep_distinct_identical_names_on_both_sides():
+    """-r1/-r2 are distinct, and for every repeat the evaluator-visible name equals the ledger's."""
+    root, plugins, ledger_mod = _vendor_project(dataset_text=THREE_ROWS)
+    try:
+        plugins.reset()
+        _sync(root)
+        code, envelope = proj.run_cli_in_process(root, "eval", "--dataset", "smoke", "--stage", "dev", "--repeats", "2")
+        assert code == 0, envelope
+        ledger_names = [_ledger_run_name(ledger_mod, rid) for rid in envelope["data"]["run_ids"]]
+        assert len(ledger_names) == 2, ledger_names
+        assert ledger_names[0].endswith("-r1") and ledger_names[1].endswith("-r2"), ledger_names
+        assert len(set(ledger_names)) == 2, ledger_names  # distinct repeats, distinct names
+        assert plugins.STATE["run_names"] == ledger_names, (plugins.STATE["run_names"], ledger_names)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)

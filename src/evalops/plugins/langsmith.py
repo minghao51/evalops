@@ -5,7 +5,7 @@ langchain-core (prompt objects are LangChain templates; evalops uses mustache {{
 No ledger: pair with plugins.ledger = sql (or mlflow).
 Alias moves (commit tags) are NOT automated here: set_alias raises CapabilityError. Use the
 LangSmith UI, or keep prompts in git/mlflow/langfuse if you want automated promotion.
-Methods marked VERIFY are best-effort against SDK changes.
+Methods whose vendor details are unverified are beta-marked (see ``evalops.beta``).
 """
 
 from ..ports import DatasetStore, EvalResult, Evaluator, LoadedPrompt, Plugin, PromptStore, RowResult, Tracer, Usage
@@ -21,7 +21,7 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
 
     def __init__(self, cfg, options):
         super().__init__(cfg, options)
-        from langsmith import Client
+        from langsmith import Client  # pyright: ignore[reportMissingImports]
 
         self.client = Client()
 
@@ -31,7 +31,7 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
 
     # ---------------- prompts ----------------
     def register(self, name, template, tags):
-        from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+        from langchain_core.prompts import ChatPromptTemplate, PromptTemplate  # pyright: ignore[reportMissingImports]
 
         if isinstance(template, list):
             obj = ChatPromptTemplate.from_messages(
@@ -44,7 +44,9 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         except Exception as e:  # noqa: BLE001  identical content -> LangSmith refuses an empty commit
             if "nothing to commit" not in str(e).lower():
                 raise
-        return self.client.pull_prompt_commit(name).commit_hash  # VERIFY attribute name
+        return self.client.pull_prompt_commit(
+            name
+        ).commit_hash  # VERIFY-BETA(langsmith-pull-prompt-commit): attribute name
 
     def load(self, name, version):
         obj = self.client.pull_prompt(f"{name}:{version}")
@@ -90,7 +92,7 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
 
     # ---------------- tracer ----------------
     def wrap(self, fn, *, run_id, row_id):
-        import langsmith as ls
+        import langsmith as ls  # pyright: ignore[reportMissingImports]
 
         def traced(**inputs):
             with ls.tracing_context(enabled=True):
@@ -155,7 +157,8 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
             )
 
         def target(inputs: dict) -> dict:
-            return {"output": predict_fn(**inputs)}
+            # judge-only is handled above, so `predict_fn` is present on this path (run.py contract).
+            return {"output": predict_fn(**inputs)}  # pyright: ignore[reportOptionalCall]
 
         def make(s):
             def ev(inputs, outputs, reference_outputs):
@@ -175,7 +178,9 @@ class LangsmithPlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
             max_concurrency=int(concurrency.get("max_workers", 4)),
         )
         rows = []
-        for i, r in enumerate(results):  # VERIFY: row dict keys run/example/evaluation_results
+        for i, r in enumerate(
+            results
+        ):  # VERIFY-BETA(langsmith-run-results): row dict keys run/example/evaluation_results
             run, ex = r["run"], r["example"]
             scores = {e.key: to_float(e.score) for e in (r.get("evaluation_results") or {}).get("results", [])}
             rows.append(

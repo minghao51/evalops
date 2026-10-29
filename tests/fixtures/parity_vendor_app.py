@@ -26,6 +26,7 @@ from evalops.ports import EvalResult, Evaluator, Plugin, RowResult, Tracer, Usag
 #:   ``usage``     {trace id: Usage}   what the tracer can backfill
 #:   ``usage_calls`` list of the id lists ``RecordingTracer.usage`` was asked for
 #:   ``wrapped``   the row ids the tracer's ``wrap`` saw
+#:   ``run_names`` the ``run_name`` the run layer handed the vendor evaluator (WP3.2a H1)
 STATE: dict = {}
 
 
@@ -40,6 +41,7 @@ def reset(**knobs) -> dict:
             "usage": {},
             "usage_calls": [],
             "wrapped": [],
+            "run_names": [],
         }
     )
     STATE.update(knobs)
@@ -79,6 +81,11 @@ def _run_rows(records, predict_fn):
     return rows
 
 
+def _record_run_name(run_name):
+    """Record the run name the run layer passed -- it must be the ledger name, never an artifact."""
+    STATE["run_names"].append(run_name)
+
+
 class VendorEvaluator(Plugin, Evaluator):
     """A vendor evaluator: it runs predict itself, row by row, and reports failures its own way."""
 
@@ -99,6 +106,7 @@ class VendorEvaluator(Plugin, Evaluator):
         concurrency,
         stored_rows=None,
     ):
+        _record_run_name(run_name)
         # `stored_rows` is the judge-only path; this fixture only needs the record loop.
         return EvalResult(rows=_run_rows(records, predict_fn), metrics={})
 
@@ -137,6 +145,7 @@ class SelfTracingEvaluator(Plugin, Evaluator, Tracer):
         concurrency,
         stored_rows=None,
     ):
+        _record_run_name(run_name)
         return EvalResult(rows=_run_rows(records, predict_fn), metrics={})
 
 

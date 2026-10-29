@@ -575,7 +575,10 @@ def _evaluate(
             # Buffer the metadata artifacts: nothing is written until every payload has been
             # redacted and verified (CONTRACT §5.1, strict is atomic). The manifest (staged after the
             # rows) hashes exactly these *stored* texts.
-            for name, body in (
+            # The loop variable is `artifact_name`, never `name`: `name` is the run's ledger name and
+            # is passed to `evaluator.evaluate(run_name=...)` below (WP3.2a H1 -- the previous
+            # `for name, body in ...` left every vendor-evaluator run named after the last artifact).
+            for artifact_name, body in (
                 (cost.ESTIMATE_ARTIFACT, json.dumps(formats.stamp(est), sort_keys=True)),
                 ("evalops/prompts.lock.json", json.dumps(locks.document(plock), sort_keys=True)),
                 (
@@ -583,7 +586,7 @@ def _evaluate(
                     json.dumps(locks.document(locks.read(cfg, ds_mod.KIND)), sort_keys=True),
                 ),
             ):
-                pending.append((name, _put_artifact(cfg, artifacts, name, body)))
+                pending.append((artifact_name, _put_artifact(cfg, artifacts, artifact_name, body)))
 
             stash: dict = {}
             # WP3.0 B: the app-reported-usage stash, one per run. Kept apart from the trace stash
@@ -651,8 +654,8 @@ def _evaluate(
             # strict refusal still leaves no artifact, and a rows refusal never writes a cassette.
             if mode == "record":
                 cassette.save()
-            for name, stored_text in pending:
-                ledger.put_artifact(run_id, name, stored_text)
+            for artifact_name, stored_text in pending:
+                ledger.put_artifact(run_id, artifact_name, stored_text)
             rows_n = max(dlock["rows"], 1)
             measured = cost.measure(cfg, result.rows) if stored is None else cost.measure(cfg, [])
             judge_usd = round(rows_n * n_llm * cost.judge_cost_per_call(cfg), 6)

@@ -36,7 +36,7 @@ the core evaluator consume it unchanged and the vendor object never escapes. Eve
 normalized through :func:`evalops.scoring.to_float`; a missing or unscorable result is ``None``
 (excluded from the aggregate), never ``0.0``.
 
-Unverified vendor details carry ``# VERIFY(...)`` markers, the same posture as
+Unverified vendor details carry a registered beta id (see :mod:`evalops.beta`), the same posture as
 ``evalops/plugins/``: the call shapes below encode the vendor documentation as read for this WP, the
 unit tests pin *evalops'* behaviour (what we pass, what we normalize) against fake SDK modules, and
 phase 3 resolves each marker against a pinned SDK version.
@@ -201,26 +201,28 @@ def _mlflow_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
     become the same exit 6.
     """
     try:
-        # VERIFY(native-mlflow): mlflow.genai.make_judge, mlflow >= 3.2
+        # VERIFY-BETA(native-mlflow-make-judge): mlflow.genai.make_judge, mlflow >= 3.2
         from mlflow.genai import make_judge  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _unavailable(adapter, spec) from exc
 
     judge = make_judge(
         name=spec.name,
-        instructions=spec.rubric,  # VERIFY(native-mlflow): the rubric is make_judge's `instructions`
+        # VERIFY-BETA(native-mlflow-make-judge): the rubric is make_judge's `instructions`
+        instructions=spec.rubric,
         model=spec.model,
-        # VERIFY(native-mlflow): make_judge documents no kwarg for the judge's prompt version or its
-        # sampling; both are passed explicitly so nothing is dropped silently. Phase 3 maps them onto
-        # MLflow's own judge-prompt version/model settings, or records the decision to drop them.
+        # VERIFY-BETA(native-mlflow-make-judge): make_judge documents no kwarg for the judge's
+        # prompt version or its sampling; both are passed explicitly so nothing is dropped silently.
+        # Phase 3 maps them onto MLflow's own judge-prompt version/model settings, or records the
+        # decision to drop them.
         prompt_version=spec.prompt_version,
         model_parameters=_model_parameters(spec),
     )
 
     @scorer(spec.name, llm=True)
     def _judge(*, inputs, outputs, expectations, trace=None):
-        # VERIFY(native-mlflow): a make_judge judge is called like a scorer and returns a Feedback
-        # whose `.value` is the score (to_float reads it).
+        # VERIFY-BETA(native-mlflow-make-judge): a make_judge judge is called like a scorer and
+        # returns a Feedback whose `.value` is the score (to_float reads it).
         feedback = judge(inputs=inputs, outputs=outputs, expectations=expectations or {})
         return to_float(feedback)
 
@@ -239,7 +241,8 @@ def _langfuse_key(spec: JudgeSpec) -> str:
 
 
 def _first_score(read_back: Any) -> Any:
-    """One score out of a read-back that may be a single score or a list of them (VERIFY).
+    """One score out of a read-back that may be a single score or a list of them
+    (VERIFY-BETA(native-langfuse-managed-evaluator)).
 
     No score yet is ``None`` (and therefore ``None`` from the scorer), never ``0.0``.
     """
@@ -252,37 +255,43 @@ def _langfuse_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
     """Langfuse managed evaluator: evalops submits the row and reads the score back (server-side).
 
     Only the *configuration* happens at build time; execution is Langfuse's, so the judge call is a
-    submit + read-back pair. Both routes are VERIFY-marked until phase 3 pins an SDK version.
+    submit + read-back pair. Both routes are beta-marked until phase 3 pins an SDK version.
     """
     try:
-        # VERIFY(native-langfuse): the v3 client on the package root
+        # VERIFY-BETA(native-langfuse-managed-evaluator): the v3 client on the package root
         from langfuse import Langfuse  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _unavailable(adapter, spec) from exc
 
     key = _langfuse_key(spec)
-    # VERIFY(native-langfuse): the constructor reads LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST from the
-    # environment and performs no request; the host is the project's, like every other role.
+    # VERIFY-BETA(native-langfuse-managed-evaluator): the constructor reads
+    # LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST from the environment and performs no request; the host is
+    # the project's, like every other role.
     client = Langfuse()
-    # VERIFY(native-langfuse): `client.api` is the generated public-API client; `evaluators`/`scores`
-    # are this adapter's names for the managed-evaluator config and score-read routes.
+    # VERIFY-BETA(native-langfuse-managed-evaluator): `client.api` is the generated public-API
+    # client; `evaluators`/`scores` are this adapter's names for the managed-evaluator config and
+    # score-read routes.
     api = client.api
-    config = api.evaluators.upsert(  # VERIFY(native-langfuse): upsert the managed LLM-as-a-judge config
+    # VERIFY-BETA(native-langfuse-managed-evaluator): upsert the managed LLM-as-a-judge config.
+    config = api.evaluators.upsert(
         name=key,
-        prompt=spec.rubric,  # VERIFY(native-langfuse): the evaluator's prompt is the rubric text
+        # VERIFY-BETA(native-langfuse-managed-evaluator): the evaluator's prompt is the rubric text.
+        prompt=spec.rubric,
         model=spec.model,
-        modelParameters=_model_parameters(spec),  # VERIFY(native-langfuse): the sampling channel
-        # VERIFY(native-langfuse): which trace fields the evaluator reads.
+        # VERIFY-BETA(native-langfuse-managed-evaluator): the sampling channel.
+        modelParameters=_model_parameters(spec),
+        # VERIFY-BETA(native-langfuse-managed-evaluator): which trace fields the evaluator reads.
         variableMapping={"input": "input", "output": "output", "expected_output": "expected_output"},
     )
 
     @scorer(spec.name, llm=True)
     def _judge(*, inputs, outputs, expectations, trace=None):
         row = {"input": inputs, "output": outputs, "expected_output": expectations or {}}
-        # VERIFY(native-langfuse): submitting a row runs the evaluator server-side and returns a
-        # handle whose `.id` names the submission.
+        # VERIFY-BETA(native-langfuse-managed-evaluator): submitting a row runs the evaluator
+        # server-side and returns a handle whose `.id` names the submission.
         submission = api.evaluators.trigger(evaluator=config.name, data=row)
-        read_back = api.scores.list(evaluator=key, submission_id=submission.id)  # VERIFY: score read-back
+        # VERIFY-BETA(native-langfuse-managed-evaluator): score read-back.
+        read_back = api.scores.list(evaluator=key, submission_id=submission.id)
         return to_float(_first_score(read_back))
 
     return _judge
@@ -291,16 +300,17 @@ def _langfuse_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
 def _openevals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
     """openevals ``create_llm_as_judge``: the judge LangSmith's native evaluation calls."""
     try:
-        # VERIFY(native-openevals): openevals.llm.create_llm_as_judge
+        # VERIFY-BETA(native-openevals): openevals.llm.create_llm_as_judge
         from openevals.llm import create_llm_as_judge  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _unavailable(adapter, spec) from exc
 
     evaluator = create_llm_as_judge(
         model=spec.model,
-        prompt=spec.rubric,  # VERIFY(native-openevals): `prompt` accepts the rubric text (str or PromptTemplate)
-        feedback_key=spec.name,  # VERIFY(native-openevals): `feedback_key` names the emitted score
-        # VERIFY(native-openevals): no documented kwarg for the prompt version or the sampling; passed
+        # VERIFY-BETA(native-openevals): `prompt` accepts the rubric text (str or PromptTemplate)
+        prompt=spec.rubric,
+        feedback_key=spec.name,  # VERIFY-BETA(native-openevals): `feedback_key` names the emitted score
+        # VERIFY-BETA(native-openevals): no documented kwarg for the prompt version or the sampling; passed
         # explicitly so nothing is dropped silently (phase 3 maps them or records the decision).
         prompt_version=spec.prompt_version,
         model_parameters=_model_parameters(spec),
@@ -308,7 +318,7 @@ def _openevals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
 
     @scorer(spec.name, llm=True)
     def _judge(*, inputs, outputs, expectations, trace=None):
-        # VERIFY(native-openevals): the evaluator is called with the row and returns a
+        # VERIFY-BETA(native-openevals): the evaluator is called with the row and returns a
         # {"key", "score", ...} dict (to_float reads the "score" entry).
         result = evaluator(inputs=inputs, outputs=outputs, reference_outputs=expectations or {})
         return to_float(result)
@@ -322,7 +332,8 @@ async def _awaited(value: Any) -> Any:
 
 
 def _pydantic_value(result: Any) -> Any:
-    """pydantic-evals returns ``{score_name: EvaluationResult}``; a single entry is unwrapped (VERIFY)."""
+    """pydantic-evals returns ``{score_name: EvaluationResult}``; a single entry is unwrapped
+    (VERIFY-BETA(native-pydantic-evals))."""
     if isinstance(result, Mapping) and len(result) == 1:
         return next(iter(result.values()))
     return result
@@ -331,7 +342,7 @@ def _pydantic_value(result: Any) -> Any:
 def _pydantic_evals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
     """The pydantic-evals ``LLMJudge`` metric, run by the core evaluator (``local``/``logfire``)."""
     try:
-        # VERIFY(native-pydantic-evals): both names are importable from pydantic_evals.evaluators
+        # VERIFY-BETA(native-pydantic-evals): both names are importable from pydantic_evals.evaluators
         from pydantic_evals.evaluators import EvaluatorContext, LLMJudge  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _unavailable(adapter, spec) from exc
@@ -339,7 +350,7 @@ def _pydantic_evals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
     judge = LLMJudge(
         rubric=spec.rubric,
         model=spec.model,
-        # VERIFY(native-pydantic-evals): LLMJudge documents no kwarg for the prompt version or the
+        # VERIFY-BETA(native-pydantic-evals): LLMJudge documents no kwarg for the prompt version or the
         # sampling; `model_settings` is pydantic-ai's spelling for the sampling settings.
         prompt_version=spec.prompt_version,
         model_settings=_model_parameters(spec),
@@ -347,7 +358,7 @@ def _pydantic_evals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
 
     @scorer(spec.name, llm=True)
     def _judge(*, inputs, outputs, expectations, trace=None):
-        # VERIFY(native-pydantic-evals): the evaluator protocol takes an EvaluatorContext whose
+        # VERIFY-BETA(native-pydantic-evals): the evaluator protocol takes an EvaluatorContext whose
         # `output`/`expected_output`/`inputs` are the row (duration/metadata are not used by a judge).
         context = EvaluatorContext(
             name=spec.name,
@@ -359,7 +370,7 @@ def _pydantic_evals_judge(spec: JudgeSpec, adapter: NativeJudge) -> JudgeFn:
         )
         result = judge.evaluate(context)
         if inspect.isawaitable(result):
-            # VERIFY(native-pydantic-evals): LLMJudge.evaluate may be async; the core evaluator is
+            # VERIFY-BETA(native-pydantic-evals): LLMJudge.evaluate may be async; the core evaluator is
             # sync, so a coroutine is awaited on a private loop rather than silently returning None.
             result = asyncio.run(_awaited(result))
         return to_float(_pydantic_value(result))
@@ -408,18 +419,18 @@ def langfuse_default_judge_model() -> str:
     """Langfuse's project default judge model, read from the public API (CONTRACT §6, WP3b.5 F1).
 
     The SDK is imported inside the body (D4); a missing ``langfuse`` is ``CapabilityError`` -> exit 6
-    naming the pip package. The call shape is ``VERIFY``-marked: phase 3 pins the SDK version and the
+    naming the pip package. The call shape is beta-marked: phase 3 pins the SDK version and the
     exact settings resource/field against a live project.
     """
     try:
-        # VERIFY(settings-langfuse): the v3 client on the package root
+        # VERIFY-BETA(settings-langfuse): the v3 client on the package root
         from langfuse import Langfuse  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _settings_unavailable("langfuse", ADAPTERS["langfuse"].package) from exc
-    # VERIFY(settings-langfuse): the constructor reads the project credentials from the environment
+    # VERIFY-BETA(settings-langfuse): the constructor reads the project credentials from the environment
     # and performs no request; the project's own defaults live on the generated public API.
     client = Langfuse()
-    # VERIFY(settings-langfuse): `projects.get()` is the current project; its default judge/evaluator
+    # VERIFY-BETA(settings-langfuse): `projects.get()` is the current project; its default judge/evaluator
     # model is the setting this check compares with `judges.<name>.model`.
     project = client.api.projects.get()
     return _default_model(project.default_evaluator_model)
@@ -430,14 +441,15 @@ def pydantic_evals_default_judge_model() -> str:
 
     Read from the installed ``LLMJudge`` metric's field default -- the package's default, not a
     model evalops invents. A missing ``pydantic-evals`` is ``CapabilityError`` -> exit 6 naming the
-    pip package. ``VERIFY``-marked: phase 3 pins the SDK version and the field name.
+    pip package. Beta-marked: phase 3 pins the SDK version and the field name.
     """
     try:
-        # VERIFY(settings-pydantic-evals): the metric whose default this reader reports
+        # VERIFY-BETA(settings-pydantic-evals): the metric whose default this reader reports
         from pydantic_evals.evaluators import LLMJudge  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise _settings_unavailable("core", ADAPTERS["core"].package) from exc
-    # VERIFY(settings-pydantic-evals): `model_fields["model"]` is LLMJudge's declared default model.
+    # VERIFY-BETA(settings-pydantic-evals): `model_fields["model"]` is LLMJudge's declared default
+    # model.
     return _default_model(LLMJudge.model_fields["model"].default)
 
 

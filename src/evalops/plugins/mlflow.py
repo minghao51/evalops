@@ -1,7 +1,8 @@
 """mlflow plugin (MLflow >= 3.2): all five roles. Works with local servers and Databricks.
 
 options: tracking_uri, registry_uri (e.g. databricks-uc), experiment, namespace (e.g. catalog.schema)
-API details verified against MLflow 3.x docs; re-verify on upgrades (marked VERIFY).
+API details verified against MLflow 3.x docs; re-verify on upgrades (unverified details are
+beta-marked: see ``evalops.beta``).
 """
 
 import os
@@ -36,7 +37,8 @@ def _trace_cost(info):
     return None
 
 
-# VERIFY(WP3.2): which `result_df` column carries a per-row predict failure is version-dependent,
+# VERIFY-BETA(mlflow-result-df): which `result_df` column carries a per-row predict failure is
+# version-dependent,
 # so every candidate below is probed only when that column is actually present in the frame -- no
 # column name is invented beyond this list. A message column's non-empty value is the failure text;
 # a status column counts as failed only when its value is a string outside the success set (or the
@@ -135,7 +137,7 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
             {"name": physical, "experiment_id": self.exp_id},
             {"name": physical},
             {"uc_table_name": physical},
-        ):  # VERIFY: signature varies by version/backend
+        ):  # VERIFY-BETA(mlflow-dataset-api): signature varies by version/backend
             try:
                 ds = d.create_dataset(**kwargs)
                 break
@@ -144,7 +146,7 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
         ds.merge_records(records)
 
     def read(self, physical):
-        df = self._ds().get_dataset(name=physical).to_df()  # VERIFY: to_df on upgrades
+        df = self._ds().get_dataset(name=physical).to_df()  # VERIFY-BETA(mlflow-dataset-api): to_df on upgrades
         out = []
         for _, row in df.iterrows():
             exp = row["expectations"] if "expectations" in df.columns else None
@@ -289,7 +291,7 @@ class MlflowPlugin(Plugin, PromptStore, DatasetStore, Ledger, Tracer, Evaluator)
         with run_ctx as active:
             res = self.mlflow.genai.evaluate(data=data, predict_fn=predict_fn, scorers=self._to_mlflow_scorers(scorers))
         rows = []
-        df = getattr(res, "result_df", None)  # VERIFY: column names across versions
+        df = getattr(res, "result_df", None)  # VERIFY-BETA(mlflow-result-df): column names across versions
         if df is not None:
             for i, (_, r) in enumerate(df.iterrows()):
                 get = r.get if hasattr(r, "get") else (lambda k, d=None: d)

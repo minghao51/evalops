@@ -4,7 +4,7 @@ Credentials via LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL (o
 No ledger: pair with plugins.ledger = sql (or mlflow).
 Notes: prompt versions are immutable; labels are pointers (one version per label). update_prompt's
 new_labels REPLACES the labels on a version, so set_alias keeps the version's existing labels.
-Methods marked VERIFY are best-effort against SDK changes.
+Methods whose vendor details are unverified are beta-marked (see ``evalops.beta``).
 """
 
 import hashlib
@@ -22,7 +22,7 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
 
     def __init__(self, cfg, options):
         super().__init__(cfg, options)
-        from langfuse import get_client
+        from langfuse import get_client  # pyright: ignore[reportMissingImports]
 
         self.lf = get_client()
 
@@ -109,7 +109,7 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         return traced
 
     def usage(self, trace_ids):
-        """VERIFY: reads trace cost/usage via the public API; ingestion is async, so retry briefly."""
+        """VERIFY-BETA(langfuse-usage-read): reads trace cost/usage via the public API; ingestion is async, so retry briefly."""
         found, attempts = {}, int(self.options.get("usage_retries", 3))
         for _ in range(attempts):
             for tid in [t for t in trace_ids if t not in found]:
@@ -159,11 +159,11 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
                 concurrency=concurrency,
                 stored_rows=stored_rows,
             )
-        from langfuse import Evaluation
+        from langfuse import Evaluation  # pyright: ignore[reportMissingImports]
 
         def task(*, item, **kwargs):
             inp = item.input if hasattr(item, "input") else item["input"]
-            return predict_fn(**inp)
+            return predict_fn(**inp)  # pyright: ignore[reportOptionalCall] -- judge-only is handled above
 
         def make(s):
             def ev(*, input, output, expected_output=None, **kwargs):  # noqa: A002 (Langfuse signature)
@@ -182,7 +182,7 @@ class LangfusePlugin(Plugin, PromptStore, DatasetStore, Tracer, Evaluator):
         )
         if dataset_store is self:
             result = self.native(dataset_physical).run_experiment(**kwargs)
-        else:  # VERIFY: top-level runner over local data
+        else:  # VERIFY-BETA(langfuse-run-experiment): top-level runner over local data
             data = [{"input": r["inputs"], "expected_output": r.get("expectations")} for r in records]
             result = self.lf.run_experiment(data=data, **kwargs)
         self.lf.flush()

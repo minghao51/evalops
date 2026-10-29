@@ -32,6 +32,13 @@ from .util import (
 
 SCHEMA_VERSION = 1
 
+#: `data` keys a command renders as its own human block. ``render`` omits them from the generic
+#: ``key: value`` listing so the same content is not printed twice (``evalops doctor`` prints
+#: ``beta`` as the ``beta (unverified surfaces):`` block after the roles). This is human output
+#: only: the envelope, and therefore every ``--json`` rendering, always carries the key. Add a key
+#: here only together with the command that renders it.
+HUMAN_SPECIAL_KEYS: frozenset[str] = frozenset({"beta"})
+
 #: Exit code -> name. The names are the ones in docs/CONTRACT.md §1; codes are never renumbered.
 EXIT_MATRIX: dict[int, str] = {
     EXIT_OK: "OK",
@@ -128,7 +135,7 @@ def render(env_dict: dict[str, Any], as_json: bool, stream: TextIO = sys.stdout)
     if data.get("summary"):
         stream.write(f"{data['summary']}\n")
     for key, value in data.items():
-        if key != "summary":
+        if key != "summary" and key not in HUMAN_SPECIAL_KEYS:
             stream.write(f"  {key}: {_plain(value)}\n")
     stream.flush()
 

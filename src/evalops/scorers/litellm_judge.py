@@ -35,7 +35,7 @@ That holds on the failure path as well: an evidence snippet -- the model's outpu
 exception's text, which can embed the request body -- is redacted when it reproduces the rubric
 (:data:`RUBRIC_ECHO_MARKER`), so ``row.error`` cannot become a copy of it.
 
-Unverified litellm details carry ``# VERIFY(...)`` markers, the same posture as
+Unverified litellm details carry a registered beta id (see :mod:`evalops.beta`), the same posture as
 :mod:`evalops.scorers.native` and ``evalops/plugins/``: the shapes below encode the LiteLLM
 documentation as read for this WP, the unit tests pin *evalops'* behaviour against a fake module,
 and phase 3 resolves each marker against a pinned SDK version. No network call happens here to
@@ -143,9 +143,9 @@ def litellm_judge(spec: JudgeSpec) -> Callable[..., float]:
     any budget reservation or ledger row.
     """
     try:
-        # VERIFY(litellm): the public entry point is `litellm.completion`, a sync call returning a
-        # ModelResponse (OpenAI-compatible). Imported inside the factory so this module stays
-        # vendor-free (D4) and the missing package is exit 6, not exit 5.
+        # VERIFY-BETA(litellm-completion-shape): the public entry point is `litellm.completion`, a
+        # sync call returning a ModelResponse (OpenAI-compatible). Imported inside the factory so
+        # this module stays vendor-free (D4) and the missing package is exit 6, not exit 5.
         # A static analyzer pointed at a checkout of this repo reports this import as unresolvable
         # (`reportMissingImports`): that is the intended state, not a defect. No vendor SDK is
         # installed in the offline environment, and the guard exists to keep this a *function-local*
@@ -155,12 +155,14 @@ def litellm_judge(spec: JudgeSpec) -> Callable[..., float]:
         raise CapabilityError("litellm", f"rubric judge {spec.name!r}", hint="pip install litellm") from exc
 
     system_prompt = _system_prompt(spec)
-    # VERIFY(litellm): the call kwargs are the OpenAI-compatible ones LiteLLM forwards -- `model`,
-    # `messages`, `temperature`, `max_tokens`, `seed`, `response_format`. `response_format` JSON
-    # mode is not supported by every provider LiteLLM fronts; a provider that rejects it will
-    # surface as an exit-5 runtime error on the first call (phase 3 resolves the fallback matrix).
+    # VERIFY-BETA(litellm-completion-shape): the call kwargs are the OpenAI-compatible ones LiteLLM
+    # forwards -- `model`, `messages`, `temperature`, `max_tokens`, `seed`, `response_format`.
+    # `response_format` JSON mode is not supported by every provider LiteLLM fronts; a provider that
+    # rejects it will surface as an exit-5 runtime error on the first call (phase 3 resolves the
+    # fallback matrix).
     settings: dict[str, Any] = {
-        "model": spec.model,  # VERIFY(litellm): a provider-prefixed pin (`openai/gpt-...`) is passed through
+        # VERIFY-BETA(litellm-completion-shape): a provider-prefixed pin (`openai/gpt-...`) is passed through
+        "model": spec.model,
         "temperature": spec.sampling.temperature,
         "max_tokens": spec.sampling.max_tokens,
         "response_format": {"type": "json_object"},
@@ -175,8 +177,9 @@ def litellm_judge(spec: JudgeSpec) -> Callable[..., float]:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _render_row(inputs=inputs, outputs=outputs, expectations=expectations)},
         ]
-        # VERIFY(litellm): `completion(messages=..., **settings)` returns a ModelResponse whose
-        # `choices[0].message.content` is the assistant text and whose `usage` carries tokens.
+        # VERIFY-BETA(litellm-completion-shape): `completion(messages=..., **settings)` returns a
+        # ModelResponse whose `choices[0].message.content` is the assistant text and whose `usage`
+        # carries tokens.
         try:
             response = litellm.completion(messages=messages, **settings)
         except EvalOpsError:
@@ -298,7 +301,8 @@ def _snippet(text: Any, spec: JudgeSpec) -> str:
 def _content(response: Any, spec: JudgeSpec) -> str:
     """``choices[0].message.content`` as a non-empty string, or an exit-5 rejection."""
     try:
-        content = response.choices[0].message.content  # VERIFY(litellm): OpenAI-shaped ModelResponse
+        # VERIFY-BETA(litellm-completion-shape): OpenAI-shaped ModelResponse
+        content = response.choices[0].message.content
     except (AttributeError, IndexError, KeyError, TypeError) as exc:
         raise _fail(spec, "the completion has no choices[0].message.content") from exc
     if not isinstance(content, str):
@@ -393,7 +397,8 @@ def _report_tokens(response: Any) -> None:
     Missing usage is skipped silently: an invented token count would corrupt both the cost report
     and the next estimate's baseline.
     """
-    usage = getattr(response, "usage", None)  # VERIFY(litellm): `usage.prompt_tokens`/`.completion_tokens`
+    # VERIFY-BETA(litellm-completion-shape): `usage.prompt_tokens`/`.completion_tokens`
+    usage = getattr(response, "usage", None)
     if usage is None:
         return
     prompt_tokens = _token_count(getattr(usage, "prompt_tokens", None))

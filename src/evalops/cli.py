@@ -17,7 +17,7 @@ import tempfile
 from collections.abc import Callable
 from typing import Any, NoReturn, cast
 
-from . import __version__, config as config_mod
+from . import __version__, beta as beta_mod, config as config_mod
 from . import envelope
 from .util import EXIT_OK, EXIT_RUNTIME, EXIT_USAGE, EvalOpsError
 
@@ -250,6 +250,9 @@ def dispatch(args, cfg) -> dict:
             "ok": ok,
             "summary": f"doctor {'ok' if ok else 'found problems'} for env '{cfg.env}'",
             "roles": report,
+            # WP3.2a: the unverified-surface registry is always reported (additive), so a beta is
+            # never a silent gap -- the hints name the action that would resolve it.
+            "beta": beta_mod.payload(),
         }
         warnings = _self_tracing_warnings(cfg, report, evaluator_plugin)
         if warnings:  # additive and conditional: absent (never ``[]``) when nothing is worth saying
@@ -555,6 +558,12 @@ def _command_from_argv(parser: argparse.ArgumentParser, argv: list[str]) -> str:
 def _finish(env_dict: dict[str, Any], as_json: bool) -> int:
     """Render the envelope and return its code, so the process exit code is the envelope code."""
     envelope.render(env_dict, as_json, sys.stdout)
+    if not as_json and env_dict.get("command") == "doctor":
+        # WP3.2a: the human companion to `data.beta` -- the unverified-surface block follows the
+        # role report, so the roles (what is wired) read before the betas (what is unproven).
+        # `envelope.render` skips `data.beta` (HUMAN_SPECIAL_KEYS), so the raw list is not printed
+        # above it: the block below is the only human rendering of the registry.
+        beta_mod.write_human()
     return int(env_dict["code"])
 
 
