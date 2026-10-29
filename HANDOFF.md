@@ -24,7 +24,7 @@ newest packet templates.
 | Phase 3b | **closed at G3b, tagged `v0.5.0`** — 3b.1 `173a416`, 3b.2 `c2beda5`, 3b.3 `f8668fe`, 3b.4 `59518c2`, 3b.5 `e484552` |
 | Phase 3 | **under way**: WP3.0 `dc617ee` (parity, ADR 0008), WP3.1a `25943b4` (mlflow+postgres contract slice), WP3.1b `e9180c6` (live langfuse v4 slice, own compose project) — 3.2's evidence list now covers mlflow/logfire/langfuse; langsmith/databricks keys backlog |
 | Tree | clean; no uncommitted work |
-| Next artifact | WP3.2 (VERIFY resolution — mlflow/logfire/langfuse findings all banked) or 3.1c (fixtures + CI nightly); langsmith/databricks keys backlog |
+| Next artifact | WP3.2a (VERIFY ledger mechanism + run-name bug + logfire read path) packet ready; 3.2b (mlflow) / 3.2c (langfuse) / 3.2d (keys, backlog) follow |
 | Gate ahead | **G3**: every VERIFY asserted-green or beta-with-hint; lineage on ≥2 backends. Needs langsmith/databricks keys eventually — Logfire live, docker available |
 
 A second session may be working this repo: read §4's coordination rules first and fetch/rebase
