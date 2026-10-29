@@ -656,10 +656,14 @@ git fetch origin && git log --oneline main..origin/main     # is the other sessi
 gh run list --limit 1                                       # confirm CI green on main
 git tag -l v0.4.0 v0.5.0                                    # G2 / G3b close markers
 sed -n '/### Phase 3 —/,/### Phase 4/p' docs/IMPLEMENTATION_MAP.md   # phase-3 rows + G3
-sed -n '/### WP3b.5/,/^## 7/p' HANDOFF.md                   # last closed 3b WP
+sed -n '/### WP3.0/,/^## 7/p' HANDOFF.md                    # the phase-3 WP records (3.0/3.1a/3.1b)
 docker compose -f tests/contract/docker-compose.yml up -d   # ledger postgres + mlflow (55000)
 docker compose -f tests/contract/docker-compose.langfuse.yml up -d   # langfuse v4 project (33000)
 ```
+
+**Harness note (bit us once):** `evalops-worker`/`evalops-scout`/`evalops-reviewer` live in the
+project-scope `.pi/agents/`, so a dispatch must pass `agentScope: "project"` (or `"both"`);
+without it the harness reports `Unknown agent` and lists only the user-scope agents.
 
 Then:
 
